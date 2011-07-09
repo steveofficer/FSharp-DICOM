@@ -79,14 +79,14 @@ let private split_string (value : string) =
             else s.Substring(0, p)::(string_splitter (s.Substring(p + 1)))
         Multi (string_splitter value)
             
-let string_parser (a : byte[]) = 
+let private string_parser (a : byte[]) = 
     let value = 
         if a.Length = 0
         then None
         else Some (to_string a |> split_string)
     value
         
-let string_parser2 (a : byte[]) f = 
+let private string_parser2 (a : byte[]) f = 
     let value = 
         if a.Length = 0
         then None
@@ -99,7 +99,7 @@ let string_parser2 (a : byte[]) f =
             |> Some
     value
 
-let binary_parser (a : byte[]) size f =
+let private binary_parser (a : byte[]) size f =
     let rec split_bytes (values : byte[]) =
         if values.Length < size
         then []
