@@ -72,12 +72,12 @@ let private split_string (value : string) =
     if value.IndexOf('\\') = -1
     then Single value
     else 
-        let rec string_splitter (s : string) =
+        let rec string_splitter acc (s : string) =
             let p = s.IndexOf("\\")
             if p = -1
-            then [s]
-            else s.Substring(0, p)::(string_splitter (s.Substring(p + 1)))
-        Multi (string_splitter value)
+            then s::acc
+            else string_splitter (s.Substring(0, p)::acc) (s.Substring(p + 1)) 
+        Multi (string_splitter [] value)
             
 let private string_parser (a : byte[]) = 
     let value = 
@@ -100,18 +100,18 @@ let private string_parser2 (a : byte[]) f =
     value
 
 let private binary_parser (a : byte[]) size f =
-    let rec split_bytes (values : byte[]) =
+    let rec split_bytes acc (values : byte[]) =
         if values.Length < size
-        then []
+        then acc
         else
             let x = values.[0..size-1]
-            x::(split_bytes (values.[size..values.Length - 1]))
+            split_bytes (x::acc) (values.[size..values.Length - 1])
 
     let value = 
         match a.Length with
         | 0 -> None
         | x when x = size -> Some (Single(f a))
-        | _ -> Some (Multi(List.map f (split_bytes a)))
+        | _ -> Some (Multi(List.map f (split_bytes [] a)))
                 
     value
 

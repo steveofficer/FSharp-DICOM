@@ -137,14 +137,14 @@ let private read_explicit_vr_element (reader : ByteReader) =
     
 //------------------------------------------------------------------------------------------------------------
 
-let rec private read_elements read_element (reader : ByteReader) = 
+let rec private read_elements read_element acc (reader : ByteReader) = 
     if reader.EOS
-    then []
+    then acc
     else
         let tag, vr, value = read_element reader
         match vr with
         | VR.SQ -> []
-        | _ -> Simple(tag, vr, value)::read_elements read_element reader
+        | _ -> read_elements read_element (Simple(tag, vr, value)::acc) reader
         
 //------------------------------------------------------------------------------------------------------------
 
@@ -164,7 +164,7 @@ let private read_meta_information data =
             |> reader.ReadBytes
         )
         
-    let meta_info = read_elements read_explicit_vr_element (ByteReader(meta_info_stream, false))
+    let meta_info = read_elements read_explicit_vr_element [] (ByteReader(meta_info_stream, false))
     (preamble, length_element::meta_info)
     
 //------------------------------------------------------------------------------------------------------------
@@ -192,7 +192,8 @@ let read (data : byte[]) transfer_syntax_decoder tag_dict =
                     then read_implicit_vr_element tag_dict 
                     else read_explicit_vr_element
                 ) 
+                meta_info
                 reader 
-        Success (preamble, meta_info @ data_set)
+        Success (preamble, data_set)
     else 
         Failure "The DICM tag was not found."
