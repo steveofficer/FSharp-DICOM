@@ -88,8 +88,9 @@ let private read_implicit_vr_element (tag_dict : Map<uint32, VR>) (reader : Byte
 //------------------------------------------------------------------------------------------------------------
 
 let private read_explicit_vr_element (reader : ByteReader) =
-    let (|PaddedVR|UnpaddedVR|) = function
-        | VR.OB | VR.OW | VR.OF | VR.SQ | VR.UN | VR.UT -> PaddedVR
+    let (|PaddedSpecialLengthVR|PaddedExplicitLengthVR|UnpaddedVR|) = function
+        | VR.OB | VR.OW | VR.OF | VR.SQ | VR.UN -> PaddedSpecialLengthVR
+        | VR.UT -> PaddedExplicitLengthVR
         | _ -> UnpaddedVR
 
     let tag = reader.ReadTag()
@@ -127,11 +128,20 @@ let private read_explicit_vr_element (reader : ByteReader) =
         
     let value = 
         match vr with
-        | PaddedVR -> 
+        | PaddedExplicitLengthVR ->
             reader.ReadBytes(2) |> ignore
-            reader.ReadInt32()
-        | UnpaddedVR -> int(reader.ReadUInt16())
-        |> reader.ReadBytes
+            // According to Part5 7.1.2 this length is actually an unsigned 32 bit integer.
+            // However we cannot allocate objects larger than 2GB, so we might need to
+            // do 2 reads and return a sequence of bytes?
+            reader.ReadInt32() |> reader.ReadBytes
+        | PaddedSpecialLengthVR -> 
+            reader.ReadBytes(2) |> ignore
+            // According to Part5 7.1.2 this length is actually an unsigned 32 bit integer.
+            // Additionally, it might not be an explicit length, for example for SQ it might be delimited
+            // values until the End Of Sequence marker.
+            reader.ReadInt32() |> reader.ReadBytes
+        | UnpaddedVR -> int(reader.ReadUInt16()) |> reader.ReadBytes
+        
         
     (tag, vr, value)
     
