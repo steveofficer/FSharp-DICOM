@@ -28,7 +28,7 @@ type private ByteReader(source_stream : System.IO.Stream, little_endian : bool) 
         
 //------------------------------------------------------------------------------------------------------------
 
-type VR =
+type Type =
 | AE = 0 
 | AS = 1 
 | AT = 2 
@@ -66,7 +66,7 @@ type 'a Result =
 //------------------------------------------------------------------------------------------------------------
 
 type DataElement = 
-| Simple of uint32 * VR * byte[] 
+| Simple of uint32 * Type * byte[] 
 | Complex of uint32 * DataElement list list
 
 //------------------------------------------------------------------------------------------------------------
@@ -79,7 +79,7 @@ let is_dicom (content : byte[]) = content.[128..131] |> decode_string  = "DICM"
 
 //------------------------------------------------------------------------------------------------------------
 
-let private read_implicit_vr_element (tag_dict : Map<uint32, VR>) (reader : ByteReader) =
+let private read_implicit_vr_element (tag_dict : Map<uint32, Type>) (reader : ByteReader) =
     let tag = reader.ReadTag()
     let vr = tag_dict.[tag]
     let value = reader.ReadInt32() |> reader.ReadBytes
@@ -89,40 +89,40 @@ let private read_implicit_vr_element (tag_dict : Map<uint32, VR>) (reader : Byte
 
 let private read_explicit_vr_element (reader : ByteReader) =
     let (|PaddedVR|UnpaddedVR|) = function
-        | VR.OB | VR.OW | VR.OF | VR.SQ | VR.UN | VR.UT -> PaddedVR
+        | Type.OB | Type.OW | Type.OF | Type.SQ | Type.UN | Type.UT -> PaddedVR
         | _ -> UnpaddedVR
 
     let tag = reader.ReadTag()
     let vr = 
         decode_string(reader.ReadBytes 2)
         |> function
-            | "AE" -> VR.AE
-            | "AS" -> VR.AS
-            | "AT" -> VR.AT
-            | "CS" -> VR.CS
-            | "DA" -> VR.DA
-            | "DS" -> VR.DS
-            | "DT" -> VR.DT
-            | "FL" -> VR.FL
-            | "FD" -> VR.FD
-            | "IS" -> VR.IS 
-            | "LO" -> VR.LO
-            | "LT" -> VR.LT
-            | "OB" -> VR.OB
-            | "OF" -> VR.OF
-            | "OW" -> VR.OW 
-            | "PN" -> VR.PN
-            | "SH" -> VR.SH
-            | "SL" -> VR.SL
-            | "SQ" -> VR.SQ
-            | "SS" -> VR.SS 
-            | "ST" -> VR.ST
-            | "TM" -> VR.TM
-            | "UI" -> VR.UI
-            | "UL" -> VR.UL
-            | "UN" -> VR.UN 
-            | "US" -> VR.US
-            | "UT" -> VR.UT
+            | "AE" -> Type.AE
+            | "AS" -> Type.AS
+            | "AT" -> Type.AT
+            | "CS" -> Type.CS
+            | "DA" -> Type.DA
+            | "DS" -> Type.DS
+            | "DT" -> Type.DT
+            | "FL" -> Type.FL
+            | "FD" -> Type.FD
+            | "IS" -> Type.IS 
+            | "LO" -> Type.LO
+            | "LT" -> Type.LT
+            | "OB" -> Type.OB
+            | "OF" -> Type.OF
+            | "OW" -> Type.OW 
+            | "PN" -> Type.PN
+            | "SH" -> Type.SH
+            | "SL" -> Type.SL
+            | "SQ" -> Type.SQ
+            | "SS" -> Type.SS 
+            | "ST" -> Type.ST
+            | "TM" -> Type.TM
+            | "UI" -> Type.UI
+            | "UL" -> Type.UL
+            | "UN" -> Type.UN 
+            | "US" -> Type.US
+            | "UT" -> Type.UT
             | _ -> failwith "unknown VR Type"
         
     let value = 
@@ -143,7 +143,7 @@ let rec private read_elements read_element acc (reader : ByteReader) =
     else
         let tag, vr, value = read_element reader
         match vr with
-        | VR.SQ -> []
+        | Type.SQ -> []
         | _ -> read_elements read_element (Simple(tag, vr, value)::acc) reader
         
 //------------------------------------------------------------------------------------------------------------

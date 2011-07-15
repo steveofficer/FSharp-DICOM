@@ -117,32 +117,32 @@ let private binary_parser (a : byte[]) size f =
 
 let parse (preamble, elements) = 
     let parse_simple_element value = function
-        | Lexer.VR.AE -> string_parser value |> AE
-        | Lexer.VR.AS -> string_parser value |> AS
-        | Lexer.VR.AT -> string_parser value |> AT
-        | Lexer.VR.CS -> string_parser value |> CS
-        | Lexer.VR.DA -> string_parser2 value to_date |> DA
-        | Lexer.VR.DS -> string_parser value |> DS
-        | Lexer.VR.DT -> string_parser2 value to_date_time |> DT
-        | Lexer.VR.FD -> binary_parser value 4 (fun x -> BitConverter.ToDouble(x, 0)) |> FD
-        | Lexer.VR.FL -> binary_parser value 4 (fun x -> BitConverter.ToDouble(x, 0)) |> FL
-        | Lexer.VR.IS -> string_parser2 value (fun x -> Int32.Parse x) |> IS
-        | Lexer.VR.LO -> string_parser value |> LO
-        | Lexer.VR.LT -> string_parser value |> LT
-        | Lexer.VR.OB -> value |> to_string |> Some |> OB
-        | Lexer.VR.OF -> value |> to_string |> Some |> OF
-        | Lexer.VR.OW -> value |> Some |> OW
-        | Lexer.VR.PN -> string_parser value |> PN
-        | Lexer.VR.SH -> string_parser value |> SH
-        | Lexer.VR.SL -> string_parser value |> SL
-        | Lexer.VR.SS -> binary_parser value 2 (fun x -> BitConverter.ToInt16(x,0)) |> SS
-        | Lexer.VR.ST -> string_parser value |> ST
-        | Lexer.VR.TM -> string_parser2 value to_time |> TM
-        | Lexer.VR.UI -> string_parser value |> UI
-        | Lexer.VR.UL -> binary_parser value 4 (fun x -> BitConverter.ToUInt32(x, 0)) |> UL
-        | Lexer.VR.UN -> value |> to_string |> Some |> UN
-        | Lexer.VR.US -> binary_parser value 2 (fun x -> BitConverter.ToUInt16(x,0)) |> US
-        | Lexer.VR.UT -> string_parser value |> UT
+        | Lexer.Type.AE -> string_parser value |> AE
+        | Lexer.Type.AS -> string_parser value |> AS
+        | Lexer.Type.AT -> string_parser value |> AT
+        | Lexer.Type.CS -> string_parser value |> CS
+        | Lexer.Type.DA -> string_parser2 value to_date |> DA
+        | Lexer.Type.DS -> string_parser value |> DS
+        | Lexer.Type.DT -> string_parser2 value to_date_time |> DT
+        | Lexer.Type.FD -> binary_parser value 4 (fun x -> BitConverter.ToDouble(x, 0)) |> FD
+        | Lexer.Type.FL -> binary_parser value 4 (fun x -> BitConverter.ToDouble(x, 0)) |> FL
+        | Lexer.Type.IS -> string_parser2 value (fun x -> Int32.Parse x) |> IS
+        | Lexer.Type.LO -> string_parser value |> LO
+        | Lexer.Type.LT -> string_parser value |> LT
+        | Lexer.Type.OB -> value |> to_string |> Some |> OB
+        | Lexer.Type.OF -> value |> to_string |> Some |> OF
+        | Lexer.Type.OW -> value |> Some |> OW
+        | Lexer.Type.PN -> string_parser value |> PN
+        | Lexer.Type.SH -> string_parser value |> SH
+        | Lexer.Type.SL -> string_parser value |> SL
+        | Lexer.Type.SS -> binary_parser value 2 (fun x -> BitConverter.ToInt16(x,0)) |> SS
+        | Lexer.Type.ST -> string_parser value |> ST
+        | Lexer.Type.TM -> string_parser2 value to_time |> TM
+        | Lexer.Type.UI -> string_parser value |> UI
+        | Lexer.Type.UL -> binary_parser value 4 (fun x -> BitConverter.ToUInt32(x, 0)) |> UL
+        | Lexer.Type.UN -> value |> to_string |> Some |> UN
+        | Lexer.Type.US -> binary_parser value 2 (fun x -> BitConverter.ToUInt16(x,0)) |> US
+        | Lexer.Type.UT -> string_parser value |> UT
         | _ -> failwith "Unknown Simple VR"
     
     let rec converter = function
