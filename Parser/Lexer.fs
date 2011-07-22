@@ -73,10 +73,6 @@ type DataElement =
 
 let private decode_string data = Encoding.ASCII.GetString(data)
 
-//------------------------------------------------------------------------------------------------------------  
-
-let is_dicom (content : byte[]) = content.[128..131] |> decode_string  = "DICM"
-
 //------------------------------------------------------------------------------------------------------------
 
 let private read_implicit_vr_element (tag_dict : Map<uint32, VR>) (reader : ByteReader) =
@@ -160,10 +156,7 @@ let rec private read_elements read_element acc (reader : ByteReader) =
 
 let private read_meta_information data = 
     let reader = ByteReader(data, false)
-    let preamble, length_element = 
-        let preamble = reader.ReadBytes(128)
-        reader.ReadBytes(4) |> ignore
-        (preamble, Simple(read_explicit_vr_element reader))
+    let length_element = Simple(read_explicit_vr_element reader)
         
     use meta_info_stream = 
         new MemoryStream(
@@ -175,15 +168,28 @@ let private read_meta_information data =
         )
         
     let meta_info = read_elements read_explicit_vr_element [] (ByteReader(meta_info_stream, false))
-    (preamble, length_element::meta_info)
+    length_element::meta_info
     
 //------------------------------------------------------------------------------------------------------------
 
-let read (data : byte[]) transfer_syntax_decoder tag_dict = 
-    if data |> is_dicom  
-    then
-        use data_stream = new MemoryStream(data)
-        let preamble, meta_info = read_meta_information data_stream
+let private read_preamble (data_stream : Stream) = 
+    if data_stream.Length > 132L
+    then 
+        let preamble = [| for x in [0..127] do yield byte(data_stream.ReadByte()) |]
+        match decode_string [| for x in [128..131] do yield byte(data_stream.ReadByte()) |] with
+        | "DICM" -> Success(preamble)
+        | _ -> Failure("The DICM tag was not found")
+    else Failure("The stream is too short")
+
+//------------------------------------------------------------------------------------------------------------
+
+let read (data_stream : Stream) transfer_syntax_decoder tag_dict = 
+    data_stream.Position <- 0L
+    
+    match read_preamble data_stream with
+    | Failure x -> Failure x
+    | Success preamble ->
+        let meta_info = read_meta_information data_stream
         
         let transfer_syntax = 
             List.find
@@ -205,5 +211,3 @@ let read (data : byte[]) transfer_syntax_decoder tag_dict =
                 meta_info
                 reader 
         Success (preamble, data_set)
-    else 
-        Failure "The DICM tag was not found."

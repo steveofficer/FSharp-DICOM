@@ -5,14 +5,11 @@
 #load "Lexer.fs"
 #load "Parser.fs"
     
-let data = System.IO.File.ReadAllBytes(@"C:\Dropbox\DICOM\samples\brain_001.dcm")
+let data_stream = new System.IO.StreamReader(@"C:\Users\stof\Dropbox\DICOM\samples\brain_001.dcm")
 
-#time
-let result = Lexer.read data (fun x -> (false, false)) Map.empty
+let result = Lexer.read data_stream.BaseStream (fun x -> (false, false)) Map.empty
 
 let parsed_result = 
     match result with
-        | Lexer.Result.Success (preamble, dataset) -> 
-            printfn "%s" "parsing"
-            Parser.parse(preamble, dataset)
+        | Lexer.Result.Success (preamble, dataset) -> Parser.parse(preamble, dataset)
         | Lexer.Result.Failure reason -> failwith reason
