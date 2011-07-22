@@ -5,13 +5,10 @@ open System
 
 //------------------------------------------------------------------------------------------------------------
 
-type private ByteReader(source_stream : System.IO.Stream, little_endian : bool) =
+type private LittleEndianByteReader(source_stream : System.IO.Stream) =
     let read_byte() = byte(source_stream.ReadByte())
     
-    member this.ReadBytes number = 
-        let buff = Array.create number (byte(0))
-        source_stream.Read(buff, 0, number) |> ignore
-        buff
+    member this.ReadBytes number = [| for x in [1..number] do yield read_byte() |]
 
     member this.ReadUInt16() = uint16(read_byte()) ||| (uint16(read_byte()) <<< 8)
     
@@ -25,7 +22,27 @@ type private ByteReader(source_stream : System.IO.Stream, little_endian : bool) 
     member this.ReadTag() = uint32(this.ReadUInt16()) <<< 16 ||| uint32(this.ReadUInt16())
     
     member this.EOS = source_stream.Position >= source_stream.Length
-        
+
+//------------------------------------------------------------------------------------------------------------
+       
+type private BigEndianByteReader(source_stream : System.IO.Stream) =
+    let read_byte() = byte(source_stream.ReadByte())
+    
+    member this.ReadBytes number = [| for x in [1..number] do yield read_byte() |]
+
+    member this.ReadUInt16() = uint16(read_byte()) ||| (uint16(read_byte()) <<< 8)
+    
+    member this.ReadInt32() = 
+        let l1 = int(read_byte()) <<< 24
+        let l2 = int(read_byte()) <<< 16
+        let l3 = int(read_byte()) <<< 8
+        let l4 = int(read_byte())
+        l1 ||| l2 ||| l3 ||| l4
+    
+    member this.ReadTag() = uint32(this.ReadUInt16()) <<< 16 ||| uint32(this.ReadUInt16())
+    
+    member this.EOS = source_stream.Position >= source_stream.Length
+     
 //------------------------------------------------------------------------------------------------------------
 
 type VR =
