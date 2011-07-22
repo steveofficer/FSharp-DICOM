@@ -138,7 +138,6 @@ let private read_explicit_vr_element (reader : ByteReader) =
             reader.ReadInt32() |> reader.ReadBytes
         | UnpaddedVR -> int(reader.ReadUInt16()) |> reader.ReadBytes
         
-        
     (tag, vr, value)
     
 //------------------------------------------------------------------------------------------------------------
@@ -156,19 +155,12 @@ let rec private read_elements read_element acc (reader : ByteReader) =
 
 let private read_meta_information data = 
     let reader = ByteReader(data, false)
-    let length_element = Simple(read_explicit_vr_element reader)
-        
-    use meta_info_stream = 
-        new MemoryStream(
-            length_element 
-            |> function
-                | Simple(_,_,value) -> BitConverter.ToInt32(value, 0)
-                | _ -> invalidArg "element" "Length Element must be a Simple element" 
-            |> reader.ReadBytes
-        )
-        
+    let length_tag, length_vr, length_value = read_explicit_vr_element reader
+    let length = 
+        int(length_value.[3]) <<< 24 ||| int(length_value.[2]) <<< 16 ||| int(length_value.[1]) <<< 8 ||| int(length_value.[0])
+    use meta_info_stream = new MemoryStream(reader.ReadBytes(length))
     let meta_info = read_elements read_explicit_vr_element [] (ByteReader(meta_info_stream, false))
-    length_element::meta_info
+    Simple(length_tag, length_vr, length_value)::meta_info
     
 //------------------------------------------------------------------------------------------------------------
 
@@ -178,8 +170,8 @@ let private read_preamble (data_stream : Stream) =
         let preamble = [| for x in [0..127] do yield byte(data_stream.ReadByte()) |]
         match decode_string [| for x in [128..131] do yield byte(data_stream.ReadByte()) |] with
         | "DICM" -> Success(preamble)
-        | _ -> Failure("The DICM tag was not found")
-    else Failure("The stream is too short")
+        | _ -> Failure("The DICM tag was not found.")
+    else Failure("The stream does not contain enough bytes to be a valid DICOM file.")
 
 //------------------------------------------------------------------------------------------------------------
 
@@ -200,8 +192,6 @@ let read (data_stream : Stream) transfer_syntax_decoder tag_dict =
                 meta_info
                 
         let little_endian, implicit_vr = transfer_syntax_decoder transfer_syntax
-        let reader = ByteReader(data_stream, little_endian)
-        
         let data_set = 
             read_elements 
                 (if little_endian 
@@ -209,5 +199,5 @@ let read (data_stream : Stream) transfer_syntax_decoder tag_dict =
                     else read_explicit_vr_element
                 ) 
                 meta_info
-                reader 
+                (ByteReader(data_stream, little_endian))
         Success (preamble, data_set)

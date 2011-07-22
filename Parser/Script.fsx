@@ -7,6 +7,7 @@
     
 let data_stream = new System.IO.StreamReader(@"C:\Users\stof\Dropbox\DICOM\samples\brain_001.dcm")
 
+#time
 let result = Lexer.read data_stream.BaseStream (fun x -> (false, false)) Map.empty
 
 let parsed_result = 
