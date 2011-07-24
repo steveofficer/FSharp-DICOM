@@ -5,46 +5,6 @@ open System
 
 //------------------------------------------------------------------------------------------------------------
 
-type private LittleEndianByteReader(source_stream : System.IO.Stream) =
-    let read_byte() = byte(source_stream.ReadByte())
-    
-    member this.ReadBytes number = [| for x in [1..number] do yield read_byte() |]
-
-    member this.ReadUInt16() = uint16(read_byte()) ||| (uint16(read_byte()) <<< 8)
-    
-    member this.ReadInt32() = 
-        let l1 = int(read_byte()) 
-        let l2 = int(read_byte()) <<< 8 
-        let l3 = int(read_byte()) <<< 16
-        let l4 = int(read_byte()) <<< 24
-        l1 ||| l2 ||| l3 ||| l4
-    
-    member this.ReadTag() = uint32(this.ReadUInt16()) <<< 16 ||| uint32(this.ReadUInt16())
-    
-    member this.EOS = source_stream.Position >= source_stream.Length
-
-//------------------------------------------------------------------------------------------------------------
-       
-type private BigEndianByteReader(source_stream : System.IO.Stream) =
-    let read_byte() = byte(source_stream.ReadByte())
-    
-    member this.ReadBytes number = [| for x in [1..number] do yield read_byte() |]
-
-    member this.ReadUInt16() = uint16(read_byte()) ||| (uint16(read_byte()) <<< 8)
-    
-    member this.ReadInt32() = 
-        let l1 = int(read_byte()) <<< 24
-        let l2 = int(read_byte()) <<< 16
-        let l3 = int(read_byte()) <<< 8
-        let l4 = int(read_byte())
-        l1 ||| l2 ||| l3 ||| l4
-    
-    member this.ReadTag() = uint32(this.ReadUInt16()) <<< 16 ||| uint32(this.ReadUInt16())
-    
-    member this.EOS = source_stream.Position >= source_stream.Length
-     
-//------------------------------------------------------------------------------------------------------------
-
 type VR =
 | AE = 0 
 | AS = 1 
@@ -76,6 +36,84 @@ type VR =
 
 //------------------------------------------------------------------------------------------------------------
 
+let private decode_string data = Encoding.ASCII.GetString(data).Trim([|char(0); ' '|])
+
+//------------------------------------------------------------------------------------------------------------
+
+[<AbstractClass>]
+type private ByteReader(source_stream : System.IO.Stream) =
+  abstract member ReadBytes : int -> byte[]
+  abstract member ReadUInt16 : unit -> uint16
+  abstract member ReadInt32 : unit -> int
+  member this.ReadTag : uint32(this.ReadUInt16()) <<< 16 ||| uint32(this.ReadUInt16())
+  member this.EOS = source_stream.Position >= source_stream.Length
+
+  member this.ReadVR() = 
+    decode_string ([| byte(source_stream.ReadByte()); byte(source_stream.ReadByte()) |])
+    |> function
+        | "AE" -> VR.AE
+        | "AS" -> VR.AS
+        | "AT" -> VR.AT
+        | "CS" -> VR.CS
+        | "DA" -> VR.DA
+        | "DS" -> VR.DS
+        | "DT" -> VR.DT
+        | "FL" -> VR.FL
+        | "FD" -> VR.FD
+        | "IS" -> VR.IS 
+        | "LO" -> VR.LO
+        | "LT" -> VR.LT
+        | "OB" -> VR.OB
+        | "OF" -> VR.OF
+        | "OW" -> VR.OW 
+        | "PN" -> VR.PN
+        | "SH" -> VR.SH
+        | "SL" -> VR.SL
+        | "SQ" -> VR.SQ
+        | "SS" -> VR.SS 
+        | "ST" -> VR.ST
+        | "TM" -> VR.TM
+        | "UI" -> VR.UI
+        | "UL" -> VR.UL
+        | "UN" -> VR.UN 
+        | "US" -> VR.US
+        | "UT" -> VR.UT
+        | _ -> failwith "unknown VR Type"
+
+type private LittleEndianByteReader(source_stream : System.IO.Stream) =
+    inherit ByteReader(source_stream)
+    
+    override this.ReadBytes number = [| for x in [1..number] do yield byte(source_stream.ReadByte()) |]
+
+    override this.ReadUInt16() = uint16(source_stream.ReadByte()) ||| (uint16(source_stream.ReadByte()) <<< 8)
+    
+    override this.ReadInt32() = 
+        let l1 = source_stream.ReadByte() 
+        let l2 = source_stream.ReadByte() <<< 8 
+        let l3 = source_stream.ReadByte() <<< 16
+        let l4 = source_stream.ReadByte() <<< 24
+        l1 ||| l2 ||| l3 ||| l4
+    
+//------------------------------------------------------------------------------------------------------------
+       
+type private BigEndianByteReader(source_stream : System.IO.Stream) =
+    inherit ByteReader(source_stream)
+
+    override this.ReadBytes number = 
+        [| for x in [1..number] do yield byte(source_stream.ReadByte()) |]
+        
+
+    override this.ReadUInt16() = uint16(source_stream.ReadByte() <<< 8) ||| uint16(source_stream.ReadByte())
+    
+    override this.ReadInt32() = 
+        let l1 = source_stream.ReadByte() <<< 24
+        let l2 = source_stream.ReadByte() <<< 16
+        let l3 = source_stream.ReadByte() <<< 8
+        let l4 = source_stream.ReadByte()
+        l1 ||| l2 ||| l3 ||| l4
+     
+//------------------------------------------------------------------------------------------------------------
+
 type 'a Result =
 | Success of 'a
 | Failure of string
@@ -85,10 +123,6 @@ type 'a Result =
 type DataElement = 
 | Simple of uint32 * VR * byte[] 
 | Complex of uint32 * DataElement list list
-
-//------------------------------------------------------------------------------------------------------------
-
-let private decode_string data = Encoding.ASCII.GetString(data)
 
 //------------------------------------------------------------------------------------------------------------
 
@@ -107,54 +141,25 @@ let private read_explicit_vr_element (reader : ByteReader) =
         | _ -> UnpaddedVR
 
     let tag = reader.ReadTag()
-    let vr = 
-        decode_string(reader.ReadBytes 2)
-        |> function
-            | "AE" -> VR.AE
-            | "AS" -> VR.AS
-            | "AT" -> VR.AT
-            | "CS" -> VR.CS
-            | "DA" -> VR.DA
-            | "DS" -> VR.DS
-            | "DT" -> VR.DT
-            | "FL" -> VR.FL
-            | "FD" -> VR.FD
-            | "IS" -> VR.IS 
-            | "LO" -> VR.LO
-            | "LT" -> VR.LT
-            | "OB" -> VR.OB
-            | "OF" -> VR.OF
-            | "OW" -> VR.OW 
-            | "PN" -> VR.PN
-            | "SH" -> VR.SH
-            | "SL" -> VR.SL
-            | "SQ" -> VR.SQ
-            | "SS" -> VR.SS 
-            | "ST" -> VR.ST
-            | "TM" -> VR.TM
-            | "UI" -> VR.UI
-            | "UL" -> VR.UL
-            | "UN" -> VR.UN 
-            | "US" -> VR.US
-            | "UT" -> VR.UT
-            | _ -> failwith "unknown VR Type"
+    let vr = reader.ReadVR()
         
-    let value = 
+    let length = 
         match vr with
         | PaddedExplicitLengthVR ->
             reader.ReadBytes(2) |> ignore
             // According to Part5 7.1.2 this length is actually an unsigned 32 bit integer.
             // However we cannot allocate objects larger than 2GB, so we might need to
             // do 2 reads and return a sequence of bytes?
-            reader.ReadInt32() |> reader.ReadBytes
+            reader.ReadInt32()
         | PaddedSpecialLengthVR -> 
             reader.ReadBytes(2) |> ignore
             // According to Part5 7.1.2 this length is actually an unsigned 32 bit integer.
             // Additionally, it might not be an explicit length, for example for SQ it might be delimited
             // values until the End Of Sequence marker.
-            reader.ReadInt32() |> reader.ReadBytes
-        | UnpaddedVR -> int(reader.ReadUInt16()) |> reader.ReadBytes
-        
+            reader.ReadInt32()
+        | UnpaddedVR -> int(reader.ReadUInt16())
+    
+    let value =  reader.ReadBytes length
     (tag, vr, value)
     
 //------------------------------------------------------------------------------------------------------------
@@ -171,12 +176,12 @@ let rec private read_elements read_element acc (reader : ByteReader) =
 //------------------------------------------------------------------------------------------------------------
 
 let private read_meta_information data = 
-    let reader = ByteReader(data, false)
+    let reader = LittleEndianByteReader data
     let length_tag, length_vr, length_value = read_explicit_vr_element reader
     let length = 
         int(length_value.[3]) <<< 24 ||| int(length_value.[2]) <<< 16 ||| int(length_value.[1]) <<< 8 ||| int(length_value.[0])
     use meta_info_stream = new MemoryStream(reader.ReadBytes(length))
-    let meta_info = read_elements read_explicit_vr_element [] (ByteReader(meta_info_stream, false))
+    let meta_info = read_elements read_explicit_vr_element [] (LittleEndianByteReader(meta_info_stream))
     Simple(length_tag, length_vr, length_value)::meta_info
     
 //------------------------------------------------------------------------------------------------------------
@@ -192,12 +197,19 @@ let private read_preamble (data_stream : Stream) =
 
 //------------------------------------------------------------------------------------------------------------
 
-let read (data_stream : Stream) transfer_syntax_decoder tag_dict = 
+let read (data_stream : Stream) tag_dict = 
     data_stream.Position <- 0L
     
     match read_preamble data_stream with
     | Failure x -> Failure x
     | Success preamble ->
+        let (|LittleEndianExplicitVR|LittleEndianImplicitVR|BigEndianExplicitVR|) = 
+            function
+            | "1.2.840.10008.1.2.1" -> LittleEndianExplicitVR
+            | "1.2.840.10008.1.2" -> LittleEndianImplicitVR
+            | "1.2.840.10008.1.2.2" -> BigEndianExplicitVR
+            | _ -> failwith "Unknown transfer syntax"
+        
         let meta_info = read_meta_information data_stream
         
         let transfer_syntax = 
@@ -207,14 +219,26 @@ let read (data_stream : Stream) transfer_syntax_decoder tag_dict =
                     | _ -> false
                 )
                 meta_info
-                
-        let little_endian, implicit_vr = transfer_syntax_decoder transfer_syntax
+            |> function
+            | Simple (_,_,value) -> decode_string value
+            | _ -> failwith "Transfer Syntax must be simple"
+        
+        let little_endian, implicit_vr = 
+            match transfer_syntax with
+            | BigEndianExplicitVR -> (false, false)
+            | LittleEndianExplicitVR -> (true, false)
+            | LittleEndianImplicitVR -> (true, true)
+
         let data_set = 
             read_elements 
-                (if little_endian 
+                (if implicit_vr 
                     then read_implicit_vr_element tag_dict 
                     else read_explicit_vr_element
                 ) 
                 meta_info
-                (ByteReader(data_stream, little_endian))
+                (if little_endian 
+                    then (LittleEndianByteReader data_stream) :> ByteReader 
+                    else (BigEndianByteReader data_stream) :> ByteReader
+                ) 
+                
         Success (preamble, data_set)
