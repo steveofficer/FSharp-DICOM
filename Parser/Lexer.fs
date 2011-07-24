@@ -45,7 +45,9 @@ type private ByteReader(source_stream : System.IO.Stream) =
   abstract member ReadBytes : int -> byte[]
   abstract member ReadUInt16 : unit -> uint16
   abstract member ReadInt32 : unit -> int
-  member this.ReadTag : uint32(this.ReadUInt16()) <<< 16 ||| uint32(this.ReadUInt16())
+  
+  member this.ReadTag() = uint32(this.ReadUInt16()) <<< 16 ||| uint32(this.ReadUInt16())
+  
   member this.EOS = source_stream.Position >= source_stream.Length
 
   member this.ReadVR() = 
