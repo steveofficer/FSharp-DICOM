@@ -40,7 +40,6 @@
   </ItemGroup>
   <ItemGroup>
     <Compile Include="Tags.fs" />
-    <Compile Include="UIs.fs" />
     <Compile Include="Lexer.fs" />
     <Compile Include="Parser.fs" />
     <None Include="Script.fsx" />

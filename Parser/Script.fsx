@@ -12,5 +12,7 @@ let result = Lexer.read data_stream.BaseStream Map.empty
 
 let parsed_result = 
     match result with
-        | Lexer.Result.Success (preamble, dataset) -> Parser.parse(preamble, dataset)
-        | Lexer.Result.Failure reason -> failwith reason
+        | Lexer.Result.Success (preamble, dataset) -> 
+            Parser.parse(preamble, dataset) |> ignore
+            printfn "Parsed"
+        | Lexer.Result.Failure reason -> printfn "%A" reason
