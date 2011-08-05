@@ -6,20 +6,19 @@ It also serves as a platform for me to learn F# while writing something useful.
 
 The library consists of 3 main parts.
 
-TagDictionary
--------------
-This is a map that is used for Implicit VR formatted DICOM files. When implicit format is used the lexer needs to
-perform a lookup against the map to determine what the VR for the Data Element should be.
+Tags.fs
+-------
+This is a simple dictionary for mapping a tag name to a uint32 value. It is for developers to use
+so that they don't have to remember the hundreds of values that are used to represent the various tags.
 
-Lexer
------
-The Lexer performs a first pass over the DICOM file in order to split it up into the Preamble, Meta-Information Header
-and the set of DataElements. The lexed data then consists of a Preamble, and a set of DataElements where the DataElements
-are simple constructs containing the VR, tag and byte[] containing the value. An exception to this is SQ VRs where the 
-DataElement will actually be a list of DataElements.
+Lexer.fs
+--------
+The Lexer performs a first pass over the DICOM file in order to split it up into the Preamble, and the set of DataElements. 
+The DataElements either represent a simple tuple of VR, tag and value, or they represent an SQ element in which case they
+are a tuple of tag and list DataElement. The value of a simple DataElement is a byte[] read straight from the DICOM file.
 
-Parser
-------
-The Parser transforms the DataElements produced by the Lexer into a stronger typed versions. This means that the DataElements no 
-longer contain byte[] as their value and are now represented by strings or ints etc. It also supports value multiplicity as 
-specified in the DICOM standard.
+Parser.fs
+---------
+The Parser transforms the DataElements produced by the Lexer into a stronger typed VR objects. This means that each DataElement's 
+byte[] value has been translated into a specific type as defined by the DataElement's VR code and the DICOM specification. These
+types are either a single value or a list of values.
