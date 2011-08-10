@@ -15,10 +15,10 @@ Lexer.fs
 --------
 The Lexer performs a first pass over the DICOM file in order to split it up into the Preamble, and the set of DataElements. 
 The DataElements either represent a simple tuple of VR, tag and value, or they represent an SQ element in which case they
-are a tuple of tag and list DataElement. The value of a simple DataElement is a byte[] read straight from the DICOM file.
+are a tuple of tag and list list DataElement. The value of a simple DataElement is a byte[] read straight from the DICOM file.
 
 Parser.fs
 ---------
-The Parser transforms the DataElements produced by the Lexer into a stronger typed VR objects. This means that each DataElement's 
+The Parser transforms the DataElements produced by the Lexer into stronger typed VR objects. This means that each DataElement's 
 byte[] value has been translated into a specific type as defined by the DataElement's VR code and the DICOM specification. These
 types are either a single value or a list of values.
