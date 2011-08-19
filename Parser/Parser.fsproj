@@ -39,6 +39,7 @@
     </Reference>
   </ItemGroup>
   <ItemGroup>
+    <Compile Include="Utils.fs" />
     <Compile Include="Tags.fs" />
     <Compile Include="Lexer.fs" />
     <Compile Include="Parser.fs" />

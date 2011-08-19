@@ -1,7 +1,5 @@
 ﻿module public Parser
 open System
-open System.Linq
-open System.Text.RegularExpressions
 
 //------------------------------------------------------------------------------------------------------------
 
@@ -54,19 +52,23 @@ type DicomObject = { Preamble : byte[]; Values : Map<uint32, VR> }
 
 //------------------------------------------------------------------------------------------------------------
 
-let private to_string data = Text.ASCIIEncoding.UTF8.GetString(data).Trim([|char(0); ' '|])
-
 let private to_date (s : string) = 
     {Day = UInt16.Parse(s.[5..6]); Month = UInt16.Parse(s.[4..5]); Year = UInt16.Parse(s.[0..3])}
 
+//------------------------------------------------------------------------------------------------------------
+
 let private to_time (s : string) = 
     {Hours = UInt16.Parse(s.[0..1]); Minutes = UInt16.Parse(s.[2..3]); Seconds = UInt16.Parse(s.[4..5]); FSeconds = uint16(1)}
+
+//------------------------------------------------------------------------------------------------------------
 
 let private to_date_time (s : string) = 
     let parts = s.Split([|' '|])
     let date = to_date parts.[0]
     let time = to_time parts.[1]
     (date, time)
+
+//------------------------------------------------------------------------------------------------------------
 
 let private split_string (value : string) =
     if value.IndexOf('\\') = -1
@@ -79,25 +81,27 @@ let private split_string (value : string) =
             else string_splitter (s.Substring(0, p)::acc) (s.Substring(p + 1)) 
         Multi (string_splitter [] value)
             
+//------------------------------------------------------------------------------------------------------------
+
 let private string_parser (a : byte[]) = 
-    let value = 
-        if a.Length = 0
-        then None
-        else Some (to_string a |> split_string)
-    value
-        
+    if a.Length = 0
+    then None
+    else Some (Utils.decode_string a |> split_string)
+
+//------------------------------------------------------------------------------------------------------------        
+
 let private string_parser2 (a : byte[]) f = 
-    let value = 
-        if a.Length = 0
-        then None
-        else 
-            to_string a
-            |> split_string
-            |> function
-                | Single x -> Single (f x)
-                | Multi x -> Multi (List.map f x)
-            |> Some
-    value
+    if a.Length = 0
+    then None
+    else 
+        Utils.decode_string a
+        |> split_string
+        |> function
+            | Single x -> Single (f x)
+            | Multi x -> Multi (List.map f x)
+        |> Some
+
+//------------------------------------------------------------------------------------------------------------
 
 let private binary_parser (a : byte[]) size f =
     let rec split_bytes acc (values : byte[]) =
@@ -107,13 +111,12 @@ let private binary_parser (a : byte[]) size f =
             let x = values.[0..size-1]
             split_bytes (x::acc) (values.[size..values.Length - 1])
 
-    let value = 
-        match a.Length with
-        | 0 -> None
-        | x when x = size -> Some (Single(f a))
-        | _ -> Some (Multi(List.map f (split_bytes [] a)))
-                
-    value
+    match a.Length with
+    | 0 -> None
+    | x when x = size -> Some (Single(f a))
+    | _ -> Some (Multi(List.map f (split_bytes [] a)))
+
+//------------------------------------------------------------------------------------------------------------
 
 let parse (preamble, elements) = 
     let parse_simple_element value = function
@@ -129,8 +132,8 @@ let parse (preamble, elements) =
         | Lexer.VR.IS -> string_parser2 value (fun x -> Int32.Parse x) |> IS
         | Lexer.VR.LO -> string_parser value |> LO
         | Lexer.VR.LT -> string_parser value |> LT
-        | Lexer.VR.OB -> value |> to_string |> Some |> OB
-        | Lexer.VR.OF -> value |> to_string |> Some |> OF
+        | Lexer.VR.OB -> value |> Utils.decode_string |> Some |> OB
+        | Lexer.VR.OF -> value |> Utils.decode_string |> Some |> OF
         | Lexer.VR.OW -> value |> Some |> OW
         | Lexer.VR.PN -> string_parser value |> PN
         | Lexer.VR.SH -> string_parser value |> SH
@@ -140,7 +143,7 @@ let parse (preamble, elements) =
         | Lexer.VR.TM -> string_parser2 value to_time |> TM
         | Lexer.VR.UI -> string_parser value |> UI
         | Lexer.VR.UL -> binary_parser value 4 (fun x -> BitConverter.ToUInt32(x, 0)) |> UL
-        | Lexer.VR.UN -> value |> to_string |> Some |> UN
+        | Lexer.VR.UN -> value |> Utils.decode_string |> Some |> UN
         | Lexer.VR.US -> binary_parser value 2 (fun x -> BitConverter.ToUInt16(x,0)) |> US
         | Lexer.VR.UT -> string_parser value |> UT
         | _ -> failwith "Unknown Simple VR"
