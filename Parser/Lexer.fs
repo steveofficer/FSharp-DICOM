@@ -99,7 +99,8 @@ let result_reader = ResultReaderBuilder()
 type private ByteReader(source_stream : System.IO.Stream) =
     abstract member ReadUInt16 : unit -> uint16 Result
     abstract member ReadInt32 : unit -> int Result
-   
+    abstract member ReadNormalizedBytes : int -> byte[] Result
+    
     member this.ReadBytes number = 
         let bytes = [|
             let counter = ref 0
@@ -181,7 +182,7 @@ type private ByteReader(source_stream : System.IO.Stream) =
         return! 
             match vr with
             | ByteSwapped -> this.ReadSwappedBytes size
-            | NotByteSwapped -> this.ReadBytes size
+            | NotByteSwapped -> this.ReadNormalizedBytes size
     }
     
 //------------------------------------------------------------------------------------------------------------
@@ -189,6 +190,8 @@ type private ByteReader(source_stream : System.IO.Stream) =
 /// An implementation of ByteReader that is used for reading data stored in Little Endian format
 type private LittleEndianByteReader(source_stream : System.IO.Stream) =
     inherit ByteReader(source_stream)
+    
+    override this.ReadNormalizedBytes number = this.ReadBytes number
     
     override this.ReadUInt16() = byte_reader {
         let! lower = source_stream.ReadByte() 
@@ -209,6 +212,11 @@ type private LittleEndianByteReader(source_stream : System.IO.Stream) =
 /// An implementation of ByteReader that is used for reading data stored in Big Endian format       
 type private BigEndianByteReader(source_stream : System.IO.Stream) =
     inherit ByteReader(source_stream)
+    
+    override this.ReadNormalizedBytes number = result_reader {
+        let! bytes = this.ReadBytes number
+        return Array.rev bytes
+    }
     
     override this.ReadUInt16() = byte_reader {
         let! upper = source_stream.ReadByte() 

@@ -6,8 +6,8 @@
 #load "Lexer.fs"
 #load "Parser.fs"
     
-//let data_stream = new System.IO.StreamReader(@"C:\Users\stof\Dropbox\DICOM\samples\BEEVR\brain_001.dcm")
-let data_stream = new System.IO.StreamReader(@"C:\Users\stof\Dropbox\DICOM\samples\LEEVR\brain_001.dcm")
+let data_stream = new System.IO.StreamReader(@"C:\Users\stof\Dropbox\DICOM\samples\BEEVR\brain_001.dcm")
+//let data_stream = new System.IO.StreamReader(@"C:\Users\stof\Dropbox\DICOM\samples\LEEVR\brain_001.dcm")
 //let data_stream = new System.IO.StreamReader(@"C:\Dropbox\DICOM\samples\BEEVR\brain_001.dcm")
 
 let result = Lexer.read data_stream.BaseStream Map.empty
