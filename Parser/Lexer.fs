@@ -99,7 +99,7 @@ let result_reader = ResultReaderBuilder()
 type private ByteReader(source_stream : System.IO.Stream) =
     abstract member ReadUInt16 : unit -> uint16 Result
     abstract member ReadInt32 : unit -> int Result
-    abstract member ReadNormalizedBytes : int -> byte[] Result
+    abstract member ReadVRValue : VR -> int -> byte[] Result
     
     member this.ReadBytes number = 
         let bytes = [|
@@ -115,20 +115,6 @@ type private ByteReader(source_stream : System.IO.Stream) =
         if bytes.Length <> number
         then Failure "Tried to read beyond the end of the stream"
         else Success bytes
-    
-    member this.ReadSwappedBytes number = result_reader {
-        if number % 2 = 1
-        then return! Failure "The number of bytes to read must be even"
-        else 
-            let! bytes = this.ReadBytes number
-            return [|
-                let counter = ref 0
-                while !counter < number do
-                    yield bytes.[!counter+1]
-                    yield bytes.[!counter]
-                    counter := !counter + 2
-            |]
-    }
     
     member this.ReadTag() = result_reader {
         let! group = this.ReadUInt16() 
@@ -171,27 +157,15 @@ type private ByteReader(source_stream : System.IO.Stream) =
             | "US" -> Success VR.US
             | "UT" -> Success VR.UT
             | x -> Failure (sprintf "%A is an unknown VR Type" x)
-        }
-    
-    member this.ReadVRValue vr size = result_reader {
-        let (|ByteSwapped|NotByteSwapped|) = 
-            function
-            | VR.AT| VR.OB | VR.OF | VR.OW -> ByteSwapped
-            | _ -> NotByteSwapped
-            
-        return! 
-            match vr with
-            | ByteSwapped -> this.ReadSwappedBytes size
-            | NotByteSwapped -> this.ReadNormalizedBytes size
     }
+    
+    default this.ReadVRValue vr size = this.ReadBytes size
     
 //------------------------------------------------------------------------------------------------------------
 
 /// An implementation of ByteReader that is used for reading data stored in Little Endian format
 type private LittleEndianByteReader(source_stream : System.IO.Stream) =
     inherit ByteReader(source_stream)
-    
-    override this.ReadNormalizedBytes number = this.ReadBytes number
     
     override this.ReadUInt16() = byte_reader {
         let! lower = source_stream.ReadByte() 
@@ -213,7 +187,22 @@ type private LittleEndianByteReader(source_stream : System.IO.Stream) =
 type private BigEndianByteReader(source_stream : System.IO.Stream) =
     inherit ByteReader(source_stream)
     
-    override this.ReadNormalizedBytes number = result_reader {
+    member private this.ReadSwappedBytes number = result_reader {
+        if number % 2 = 1
+        then return! Failure "The number of bytes to read must be even"
+        else 
+            let! bytes = this.ReadBytes number
+            return [|
+                let counter = ref 0
+                while !counter < number do
+                    let x = !counter
+                    yield bytes.[x+1]
+                    yield bytes.[x]
+                    counter := x + 2
+            |]
+    }
+    
+    member private this.ReadLittleEndianBytes number = result_reader {
         let! bytes = this.ReadBytes number
         return Array.rev bytes
     }
@@ -231,13 +220,27 @@ type private BigEndianByteReader(source_stream : System.IO.Stream) =
         let! b4 = source_stream.ReadByte()
         return (b1 <<< 24) ||| (b2 <<< 16) ||| (b3 <<< 8) ||| b4
     }
+    
+    override this.ReadVRValue vr size = result_reader {
+        let (|ByteSwapped|ToLittleEndian|Unmodified|) = 
+            function
+            | VR.AT | VR.OB | VR.OF | VR.OW -> ByteSwapped
+            | VR.SL | VR.SS | VR.US | VR.UL  -> ToLittleEndian
+            | _ -> Unmodified 
+            
+        return! 
+            match vr with
+            | ByteSwapped -> this.ReadSwappedBytes size
+            | ToLittleEndian -> this.ReadLittleEndianBytes size
+            | Unmodified -> this.ReadBytes size
+    }
      
 //------------------------------------------------------------------------------------------------------------
 
-let private read_implicit_vr_element (tag_dict : Map<uint32, VR>) (r : ByteReader) = result_reader {
+let private read_implicit_vr_element tag_dict (r : ByteReader) = result_reader {
     let! tag = r.ReadTag()
+    let! vr = tag_dict tag
     let! length = r.ReadInt32()
-    let vr = tag_dict.[tag]
     let! value = r.ReadVRValue vr length
     return (tag, vr, value)
 }
@@ -351,8 +354,6 @@ let read (data_stream : Stream) tag_dict = result_reader {
         | LittleEndianExplicitVR -> Success (true, false)
         | LittleEndianImplicitVR -> Success (true, true)
         | Unknown -> Failure (sprintf "%s is an unknown transfer syntax" transfer_syntax)
-    printfn "Little Endian %A" little_endian
-    printfn "Implicit VR %A" implicit_vr
     let! data_set = 
         read_elements 
             (if implicit_vr 

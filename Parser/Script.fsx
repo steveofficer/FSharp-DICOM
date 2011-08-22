@@ -10,7 +10,7 @@ let data_stream = new System.IO.StreamReader(@"C:\Users\stof\Dropbox\DICOM\sampl
 //let data_stream = new System.IO.StreamReader(@"C:\Users\stof\Dropbox\DICOM\samples\LEEVR\brain_001.dcm")
 //let data_stream = new System.IO.StreamReader(@"C:\Dropbox\DICOM\samples\BEEVR\brain_001.dcm")
 
-let result = Lexer.read data_stream.BaseStream Map.empty
+let result = Lexer.read data_stream.BaseStream (fun x -> Lexer.Failure "Doesn't exist")
 
 let parsed_result = 
     match result with
