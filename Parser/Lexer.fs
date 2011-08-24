@@ -70,6 +70,13 @@ type ByteReaderBuilder()=
     
     member this.ReturnFrom(a : 'a Result) = a
 
+    member this.For(sequence, f) = [|
+        for item in sequence do
+            match f item with
+            | Success x -> yield x
+            | Failure r -> failwith r 
+    |]
+        
 //------------------------------------------------------------------------------------------------------------
 
 /// A computation expression used for progressing through a series of expressions that return Result. 
@@ -101,20 +108,15 @@ type private ByteReader(source_stream : System.IO.Stream) =
     abstract member ReadInt32 : unit -> int Result
     abstract member ReadVRValue : VR -> int -> byte[] Result
     
-    member this.ReadBytes number = 
-        let bytes = [|
-            let counter = ref 0
-            while !counter < number do
-                let value = source_stream.ReadByte()
-                if value = -1
-                then counter := number
-                else 
-                    counter := !counter + 1
-                    yield byte(value)
-        |]
-        if bytes.Length <> number
-        then Failure "Tried to read beyond the end of the stream"
-        else Success bytes
+    member this.ReadBytes number = result_reader {
+        let! bytes = byte_reader {
+            // Create an array of bytes by reading from the stream.
+            for x in [1..number] do
+                let! value = source_stream.ReadByte()
+                yield value
+            }
+        return bytes
+    }
     
     member this.ReadTag() = result_reader {
         let! group = this.ReadUInt16() 
