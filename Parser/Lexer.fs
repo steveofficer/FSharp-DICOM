@@ -70,12 +70,11 @@ type ByteReaderBuilder()=
     
     member this.ReturnFrom(a : 'a Result) = a
 
-    member this.For(sequence, f) = [|
-        for item in sequence do
-            match f item with
-            | Success x -> yield x
-            | Failure r -> failwith r 
-    |]
+    member this.For(sequence, f) = 
+        let success_read x = f x
+        Seq.takeWhile(
+
+    member this.Yield a = Success a
         
 //------------------------------------------------------------------------------------------------------------
 
@@ -90,6 +89,7 @@ type ResultReaderBuilder() =
         match a with
         | Failure x -> Failure x
         | Success x -> f x
+
     member this.Return(a) = Success a
     
     member this.ReturnFrom(a : 'a Result) = a
@@ -114,7 +114,7 @@ type private ByteReader(source_stream : System.IO.Stream) =
             for x in [1..number] do
                 let! value = source_stream.ReadByte()
                 yield value
-            }
+        }
         return bytes
     }
     
