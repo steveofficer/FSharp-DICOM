@@ -70,9 +70,18 @@ type ByteReaderBuilder()=
     
     member this.ReturnFrom(a : 'a Result) = a
 
-    member this.For(sequence, f) = 
-        let success_read x = f x
-        Seq.takeWhile(
+    member this.While(s, f) = 
+        var result = 
+        // Loop through each int as long as the int isn't -1
+        // as soon as it is -1 stop looping and return failure.
+        // If we make it through the entire sequence then return success
+            
+                
+        for item in s do
+            match this.Bind(item, f) with
+            | Success item -> item
+            | Failure x -> Failure x
+            
 
     member this.Yield a = Success a
         
@@ -110,11 +119,12 @@ type private ByteReader(source_stream : System.IO.Stream) =
     
     member this.ReadBytes number = result_reader {
         let! bytes = byte_reader {
-            // Create an array of bytes by reading from the stream.
-            for x in [1..number] do
-                let! value = source_stream.ReadByte()
-                yield value
+            let counter = ref 0
+            while !counter < number do
+                yield source_stream.ReadByte()
+                counter := counter + 1
         }
+            
         return bytes
     }
     
