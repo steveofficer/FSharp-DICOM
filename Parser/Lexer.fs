@@ -64,27 +64,12 @@ type ByteReaderBuilder()=
     member this.Bind(a, f) = 
         match a with
         | -1 -> Failure "Tried to read beyond end of stream"
-        | _ -> f a
+        | _ -> f (byte(a))
 
     member this.Return(a) = Success a
     
     member this.ReturnFrom(a : 'a Result) = a
-
-    member this.While(s, f) = 
-        var result = 
-        // Loop through each int as long as the int isn't -1
-        // as soon as it is -1 stop looping and return failure.
-        // If we make it through the entire sequence then return success
-            
-                
-        for item in s do
-            match this.Bind(item, f) with
-            | Success item -> item
-            | Failure x -> Failure x
-            
-
-    member this.Yield a = Success a
-        
+    
 //------------------------------------------------------------------------------------------------------------
 
 /// A computation expression used for progressing through a series of expressions that return Result. 
@@ -118,16 +103,35 @@ type private ByteReader(source_stream : System.IO.Stream) =
     abstract member ReadVRValue : VR -> int -> byte[] Result
     
     member this.ReadBytes number = result_reader {
-        let! bytes = byte_reader {
-            let counter = ref 0
-            while !counter < number do
-                yield source_stream.ReadByte()
-                counter := counter + 1
+        let byte_seq = seq {
+            for x in [1..number] do
+                yield byte_reader { 
+                    let! result = source_stream.ReadByte()
+                    return result
+                }
         }
+        
+        let! bytes = 
+            let has_failed = function | Some _ -> true | None -> false
             
+            let result = System.Collections.Generic.List<byte>()
+            // This tracks the reason for failure
+            let failure_message = ref None
+            
+            use it = byte_seq.GetEnumerator()
+            // Iterate through the sequence while there are still items, and we have not encountered a failure
+            while it.MoveNext() && not(has_failed !failure_message) do
+                match it.Current with
+                | Success b -> result.Add(b)
+                | Failure r -> failure_message := Some r
+            
+            match !failure_message with
+            | Some message -> Failure message
+            | None -> Success (result.ToArray())
+        
         return bytes
     }
-    
+        
     member this.ReadTag() = result_reader {
         let! group = this.ReadUInt16() 
         let! element = this.ReadUInt16()
@@ -190,7 +194,7 @@ type private LittleEndianByteReader(source_stream : System.IO.Stream) =
         let! b2 = source_stream.ReadByte()
         let! b3 = source_stream.ReadByte()
         let! b4 = source_stream.ReadByte()
-        return b1 ||| (b2 <<< 8) ||| (b3 <<< 16) ||| (b4 <<< 24)
+        return int(b1) ||| (int(b2) <<< 8) ||| (int(b3) <<< 16) ||| (int(b4) <<< 24)
     }
 
 //------------------------------------------------------------------------------------------------------------
@@ -201,16 +205,13 @@ type private BigEndianByteReader(source_stream : System.IO.Stream) =
     
     member private this.ReadSwappedBytes number = result_reader {
         if number % 2 = 1
-        then return! Failure "The number of bytes to read must be even"
+        then return! Failure "The number of bytes to read must be even when doing byte swapping"
         else 
             let! bytes = this.ReadBytes number
             return [|
-                let counter = ref 0
-                while !counter < number do
-                    let x = !counter
+                for x in [0..2..number-1] do
                     yield bytes.[x+1]
                     yield bytes.[x]
-                    counter := x + 2
             |]
     }
     
@@ -230,7 +231,7 @@ type private BigEndianByteReader(source_stream : System.IO.Stream) =
         let! b2 = source_stream.ReadByte()
         let! b3 = source_stream.ReadByte()
         let! b4 = source_stream.ReadByte()
-        return (b1 <<< 24) ||| (b2 <<< 16) ||| (b3 <<< 8) ||| b4
+        return (int(b1) <<< 24) ||| (int(b2) <<< 16) ||| (int(b3) <<< 8) ||| int(b4)
     }
     
     override this.ReadVRValue vr size = result_reader {
@@ -260,16 +261,13 @@ let private read_implicit_vr_element tag_dict (r : ByteReader) = result_reader {
 //------------------------------------------------------------------------------------------------------------
 
 let private read_explicit_vr_element (r : ByteReader) = result_reader {
-    let (|PaddedSpecialLengthVR|PaddedExplicitLengthVR|UnpaddedVR|) = function
-        | VR.OB | VR.OW | VR.OF | VR.SQ | VR.UN -> PaddedSpecialLengthVR
-        | VR.UT -> PaddedExplicitLengthVR
-        | _ -> UnpaddedVR
-
-    let! tag = r.ReadTag()
-    let! vr = r.ReadVR()
+    let determine_value_length = 
+        let (|PaddedSpecialLengthVR|PaddedExplicitLengthVR|UnpaddedVR|) = function
+            | VR.OB | VR.OW | VR.OF | VR.SQ | VR.UN -> PaddedSpecialLengthVR
+            | VR.UT -> PaddedExplicitLengthVR
+            | _ -> UnpaddedVR
         
-    let! length = 
-        match vr with
+        function
         | PaddedExplicitLengthVR -> 
             result_reader {
                 let reserved = r.ReadBytes(2)
@@ -290,8 +288,11 @@ let private read_explicit_vr_element (r : ByteReader) = result_reader {
             result_reader { 
                 let! result = r.ReadUInt16()
                 return int(result)
-            }      
-    
+            }
+            
+    let! tag = r.ReadTag()
+    let! vr = r.ReadVR()
+    let! length = determine_value_length vr
     let! value =  r.ReadVRValue vr length
     return (tag, vr, value)
 }
@@ -311,11 +312,14 @@ let rec private read_elements f (acc : DataElement list) (r : ByteReader) : Data
 //------------------------------------------------------------------------------------------------------------
 
 let private read_meta_information data = result_reader {
+    // Find out what the length of the header is and then read the bytes that comprise the header
     let reader = LittleEndianByteReader data
     let! (length_tag, length_vr, length_value : byte[]) = read_explicit_vr_element reader
     let length = 
         int(length_value.[3]) <<< 24 ||| int(length_value.[2]) <<< 16 ||| int(length_value.[1]) <<< 8 ||| int(length_value.[0])
     let! value = reader.ReadBytes(length)
+    
+    // Now read the bytes that represent the header
     use meta_info_stream = new MemoryStream(value)
     let! meta_info = read_elements read_explicit_vr_element [] (LittleEndianByteReader(meta_info_stream))
     return Simple(length_tag, length_vr, length_value)::meta_info
@@ -326,8 +330,8 @@ let private read_meta_information data = result_reader {
 let private read_preamble (data_stream : Stream) = 
     if data_stream.Length > 132L
     then 
-        let preamble = [| for x in [0..127] do yield byte(data_stream.ReadByte()) |]
-        match Utils.decode_string [| for x in [128..131] do yield byte(data_stream.ReadByte()) |] with
+        let preamble = [| for x = 0 to 127 do yield byte(data_stream.ReadByte()) |]
+        match Utils.decode_string [| for x = 128 to 131 do yield byte(data_stream.ReadByte()) |] with
         | "DICM" -> Success(preamble)
         | _ -> Failure "The DICM tag was not found."
     else Failure "The stream does not contain enough data to be a valid DICOM file."
@@ -342,30 +346,32 @@ let read (data_stream : Stream) tag_dict = result_reader {
     let! meta_info = read_meta_information data_stream
     
     let! transfer_syntax = 
-        List.find
+        List.tryFind
             (function
                 | Simple(tag,_,_) -> tag = Tags.TransferSyntaxUID
                 | _ -> false
             )
             meta_info
         |> function
-            | Simple (_,_,value) -> Success (Utils.decode_string value)
-            | _ -> Failure "Transfer Syntax must be simple"
+            | Some x ->
+                match x with
+                | Simple (_,_,value) -> Success (Utils.decode_string value)
+                | _ -> Failure "Transfer Syntax must be simple VR type"
+            | None -> Failure "The Transfer Syntax tag could not be found"
     
-    // Set up an active pattern so that we can do some pattern matching on the TransferSyntax
-    let (|LittleEndianExplicitVR|LittleEndianImplicitVR|BigEndianExplicitVR|Unknown|) = 
-        function
+    let! little_endian, implicit_vr = 
+        // Set up an active pattern so that we can do some pattern matching on the TransferSyntax
+        let (|LittleEndianExplicitVR|LittleEndianImplicitVR|BigEndianExplicitVR|Unknown|) = function
             | "1.2.840.10008.1.2.1" -> LittleEndianExplicitVR
             | "1.2.840.10008.1.2" -> LittleEndianImplicitVR
             | "1.2.840.10008.1.2.2" -> BigEndianExplicitVR
             | _ -> Unknown
-            
-    let! little_endian, implicit_vr = 
         match transfer_syntax with
         | BigEndianExplicitVR -> Success (false, false)
         | LittleEndianExplicitVR -> Success (true, false)
         | LittleEndianImplicitVR -> Success (true, true)
         | Unknown -> Failure (sprintf "%s is an unknown transfer syntax" transfer_syntax)
+        
     let! data_set = 
         read_elements 
             (if implicit_vr 
