@@ -102,36 +102,26 @@ type private ByteReader(source_stream : System.IO.Stream) =
     abstract member ReadInt32 : unit -> int Result
     abstract member ReadVRValue : VR -> int -> byte[] Result
     
-    member this.ReadBytes number = result_reader {
-        let byte_seq = seq {
-            for x in [1..number] do
-                yield byte_reader { 
-                    let! result = source_stream.ReadByte()
-                    return result
-                }
-        }
-        
-        let! bytes = 
-            let has_failed = function | Some _ -> true | None -> false
-            
-            let result = System.Collections.Generic.List<byte>()
-            // This tracks the reason for failure
-            let failure_message = ref None
-            
-            use it = byte_seq.GetEnumerator()
-            // Iterate through the sequence while there are still items, and we have not encountered a failure
-            while it.MoveNext() && not(has_failed !failure_message) do
-                match it.Current with
-                | Success b -> result.Add(b)
-                | Failure r -> failure_message := Some r
-            
-            match !failure_message with
-            | Some message -> Failure message
-            | None -> Success (result.ToArray())
-        
-        return bytes
+    member this.ReadByte() = byte_reader {
+        let! b = source_stream.ReadByte()
+        return b
     }
+    
+    member this.ReadBytes number = 
+        let rec reader (buff : byte[]) i = 
+            if i = number
+            then Success buff
+            else
+                match this.ReadByte() with
+                | Failure reason -> Failure reason
+                | Success b ->
+                    buff.[i] <- b
+                    reader buff (i+1)
         
+        if number = 0
+        then Success [||]
+        else reader (Array.create number 0uy) 0
+    
     member this.ReadTag() = result_reader {
         let! group = this.ReadUInt16() 
         let! element = this.ReadUInt16()
@@ -140,10 +130,10 @@ type private ByteReader(source_stream : System.IO.Stream) =
 
     member this.EOS = source_stream.Position >= source_stream.Length
 
-    member this.ReadVR() = byte_reader {
-        let! char1 = source_stream.ReadByte()
-        let! char2 = source_stream.ReadByte()
-        return! Utils.decode_string ([| byte(char1); byte(char2) |])
+    member this.ReadVR() = result_reader {
+        let! char1 = this.ReadByte()
+        let! char2 = this.ReadByte()
+        return! Utils.decode_string ([| char1; char2 |])
         |> function
             | "AE" -> Success VR.AE
             | "AS" -> Success VR.AS
@@ -183,17 +173,17 @@ type private ByteReader(source_stream : System.IO.Stream) =
 type private LittleEndianByteReader(source_stream : System.IO.Stream) =
     inherit ByteReader(source_stream)
     
-    override this.ReadUInt16() = byte_reader {
-        let! lower = source_stream.ReadByte() 
-        let! upper = source_stream.ReadByte()
+    override this.ReadUInt16() = result_reader {
+        let! lower = this.ReadByte() 
+        let! upper = this.ReadByte()
         return (uint16(upper) <<< 8) ||| uint16(lower) 
     }
 
-    override this.ReadInt32() = byte_reader {
-        let! b1 = source_stream.ReadByte() 
-        let! b2 = source_stream.ReadByte()
-        let! b3 = source_stream.ReadByte()
-        let! b4 = source_stream.ReadByte()
+    override this.ReadInt32() = result_reader {
+        let! b1 = this.ReadByte() 
+        let! b2 = this.ReadByte()
+        let! b3 = this.ReadByte()
+        let! b4 = this.ReadByte()
         return int(b1) ||| (int(b2) <<< 8) ||| (int(b3) <<< 16) ||| (int(b4) <<< 24)
     }
 
@@ -220,17 +210,17 @@ type private BigEndianByteReader(source_stream : System.IO.Stream) =
         return Array.rev bytes
     }
     
-    override this.ReadUInt16() = byte_reader {
-        let! upper = source_stream.ReadByte() 
-        let! lower = source_stream.ReadByte()
+    override this.ReadUInt16() = result_reader {
+        let! upper = this.ReadByte() 
+        let! lower = this.ReadByte()
         return (uint16(upper) <<< 8) ||| uint16(lower)
     }
 
-    override this.ReadInt32() = byte_reader {
-        let! b1 = source_stream.ReadByte()
-        let! b2 = source_stream.ReadByte()
-        let! b3 = source_stream.ReadByte()
-        let! b4 = source_stream.ReadByte()
+    override this.ReadInt32() = result_reader {
+        let! b1 = this.ReadByte()
+        let! b2 = this.ReadByte()
+        let! b3 = this.ReadByte()
+        let! b4 = this.ReadByte()
         return (int(b1) <<< 24) ||| (int(b2) <<< 16) ||| (int(b3) <<< 8) ||| int(b4)
     }
     
