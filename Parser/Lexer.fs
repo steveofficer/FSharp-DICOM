@@ -64,7 +64,7 @@ type ByteReaderBuilder()=
     member this.Bind(a, f) = 
         match a with
         | -1 -> Failure "Tried to read beyond end of stream"
-        | _ -> f (byte(a))
+        | _ -> f a
 
     member this.Return(a) = Success a
     
@@ -104,23 +104,14 @@ type private ByteReader(source_stream : System.IO.Stream) =
     
     member this.ReadByte() = byte_reader {
         let! b = source_stream.ReadByte()
-        return b
+        return byte(b)
     }
     
     member this.ReadBytes number = 
-        let rec reader (buff : byte[]) i = 
-            if i = number
-            then Success buff
-            else
-                match this.ReadByte() with
-                | Failure reason -> Failure reason
-                | Success b ->
-                    buff.[i] <- b
-                    reader buff (i+1)
-        
-        if number = 0
-        then Success [||]
-        else reader (Array.create number 0uy) 0
+        let buffer = Array.create number 0uy
+        if source_stream.Read(buffer, 0, number) = number
+        then Success buffer
+        else Failure (sprintf "Could not read %i bytes from the stream" number)
     
     member this.ReadTag() = result_reader {
         let! group = this.ReadUInt16() 
@@ -173,18 +164,18 @@ type private ByteReader(source_stream : System.IO.Stream) =
 type private LittleEndianByteReader(source_stream : System.IO.Stream) =
     inherit ByteReader(source_stream)
     
-    override this.ReadUInt16() = result_reader {
-        let! lower = this.ReadByte() 
-        let! upper = this.ReadByte()
+    override this.ReadUInt16() = byte_reader {
+        let! lower = source_stream.ReadByte() 
+        let! upper = source_stream.ReadByte()
         return (uint16(upper) <<< 8) ||| uint16(lower) 
     }
 
-    override this.ReadInt32() = result_reader {
-        let! b1 = this.ReadByte() 
-        let! b2 = this.ReadByte()
-        let! b3 = this.ReadByte()
-        let! b4 = this.ReadByte()
-        return int(b1) ||| (int(b2) <<< 8) ||| (int(b3) <<< 16) ||| (int(b4) <<< 24)
+    override this.ReadInt32() = byte_reader {
+        let! b1 = source_stream.ReadByte() 
+        let! b2 = source_stream.ReadByte()
+        let! b3 = source_stream.ReadByte()
+        let! b4 = source_stream.ReadByte()
+        return b1 ||| (b2 <<< 8) ||| (b3 <<< 16) ||| (b4 <<< 24)
     }
 
 //------------------------------------------------------------------------------------------------------------
@@ -210,18 +201,18 @@ type private BigEndianByteReader(source_stream : System.IO.Stream) =
         return Array.rev bytes
     }
     
-    override this.ReadUInt16() = result_reader {
-        let! upper = this.ReadByte() 
-        let! lower = this.ReadByte()
+    override this.ReadUInt16() = byte_reader {
+        let! upper = source_stream.ReadByte() 
+        let! lower = source_stream.ReadByte()
         return (uint16(upper) <<< 8) ||| uint16(lower)
     }
 
-    override this.ReadInt32() = result_reader {
-        let! b1 = this.ReadByte()
-        let! b2 = this.ReadByte()
-        let! b3 = this.ReadByte()
-        let! b4 = this.ReadByte()
-        return (int(b1) <<< 24) ||| (int(b2) <<< 16) ||| (int(b3) <<< 8) ||| int(b4)
+    override this.ReadInt32() = byte_reader {
+        let! b1 = source_stream.ReadByte()
+        let! b2 = source_stream.ReadByte()
+        let! b3 = source_stream.ReadByte()
+        let! b4 = source_stream.ReadByte()
+        return (b1 <<< 24) ||| (b2 <<< 16) ||| (b3 <<< 8) ||| b4
     }
     
     override this.ReadVRValue vr size = result_reader {
@@ -320,8 +311,11 @@ let private read_meta_information data = result_reader {
 let private read_preamble (data_stream : Stream) = 
     if data_stream.Length > 132L
     then 
-        let preamble = [| for x = 0 to 127 do yield byte(data_stream.ReadByte()) |]
-        match Utils.decode_string [| for x = 128 to 131 do yield byte(data_stream.ReadByte()) |] with
+        let preamble = Array.create 128 0uy
+        data_stream.Read(preamble, 0, 128) |> ignore
+        let marker = Array.create 4 0uy
+        data_stream.Read(marker, 0, 4) |> ignore
+        match Utils.decode_string marker with
         | "DICM" -> Success(preamble)
         | _ -> Failure "The DICM tag was not found."
     else Failure "The stream does not contain enough data to be a valid DICOM file."
