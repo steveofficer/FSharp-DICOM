@@ -185,15 +185,18 @@ type private BigEndianByteReader(source_stream : System.IO.Stream) =
     inherit ByteReader(source_stream)
     
     member private this.ReadSwappedBytes number = result_reader {
+        let populate_buff (src : byte[]) (target : byte[]) =
+            for x in [0..2..number-1] do
+                target.[x] <- src.[x+1]
+                target.[x+1] <- src.[x]
+            target
+
         if number % 2 = 1
         then return! Failure "The number of bytes to read must be even when doing byte swapping"
         else 
             let! bytes = this.ReadBytes number
-            return [|
-                for x in [0..2..number-1] do
-                    yield bytes.[x+1]
-                    yield bytes.[x]
-            |]
+            let target = Array.create number 0uy
+            return populate_buff bytes target
     }
     
     member private this.ReadLittleEndianBytes number = result_reader {
@@ -251,7 +254,7 @@ let private read_explicit_vr_element (r : ByteReader) = result_reader {
         function
         | PaddedExplicitLengthVR -> 
             result_reader {
-                let reserved = r.ReadBytes(2)
+                let! reserved = r.ReadBytes(2)
                 // According to Part5 7.1.2 this length is actually an unsigned 32 bit integer.
                 // However we cannot allocate objects larger than 2GB, so we might need to
                 // do 2 reads and return a sequence of bytes?
@@ -259,7 +262,7 @@ let private read_explicit_vr_element (r : ByteReader) = result_reader {
             }
         | PaddedSpecialLengthVR -> 
             result_reader {
-                let reserved = r.ReadBytes(2)
+                let! reserved = r.ReadBytes(2)
                 // According to Part5 7.1.2 this length is actually an unsigned 32 bit integer.
                 // Additionally, it might not be an explicit length, for example for SQ it might be delimited
                 // values until the End Of Sequence marker.
@@ -297,7 +300,7 @@ let private read_meta_information data = result_reader {
     let reader = LittleEndianByteReader data
     let! (length_tag, length_vr, length_value : byte[]) = read_explicit_vr_element reader
     let length = 
-        int(length_value.[3]) <<< 24 ||| int(length_value.[2]) <<< 16 ||| int(length_value.[1]) <<< 8 ||| int(length_value.[0])
+        (int(length_value.[3]) <<< 24) ||| (int(length_value.[2]) <<< 16) ||| (int(length_value.[1]) <<< 8) ||| int(length_value.[0])
     let! value = reader.ReadBytes(length)
     
     // Now read the bytes that represent the header
