@@ -283,16 +283,19 @@ let private read_explicit_vr_element (r : ByteReader) = result_reader {
 
 //------------------------------------------------------------------------------------------------------------
 
-let rec private read_elements f (acc : DataElement list) (r : ByteReader) : DataElement list Result = result_reader {
-    if r.EOS
-    then return acc
-    else
-        let! tag, vr, value = f r
-        match vr with
-        | VR.SQ -> return []
-        | _ -> return! read_elements f (Simple(tag, vr, value)::acc) r
-}
-
+let private read_elements f (acc : DataElement list) (r : ByteReader) : DataElement list Result = 
+    let rec reader result =
+        if r.EOS
+        then Success acc
+        else
+            match f r with
+            | Failure reason -> Failure reason
+            | Success (tag, vr, value) ->
+                if vr = VR.SQ 
+                then reader (Complex(tag, [])::acc)
+                else reader (Simple(tag, vr, value)::acc)
+    reader acc
+            
 //------------------------------------------------------------------------------------------------------------
 
 let private read_meta_information data = result_reader {
