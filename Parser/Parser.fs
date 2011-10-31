@@ -71,21 +71,21 @@ let private to_date_time (s : string) =
 //------------------------------------------------------------------------------------------------------------
 
 let private split_string (value : string) =
-    if value.IndexOf('\\') = -1
-    then Single value
-    else 
-        let rec string_splitter acc (s : string) =
-            match s.IndexOf("\\") with
-                | -1 -> s::acc
-                | p -> string_splitter (s.Substring(0, p)::acc) (s.Substring(p + 1)) 
-        Multi (string_splitter [] value)
+    match value.IndexOf('\\') with
+        | -1 -> Single value
+        | _ ->
+            let rec string_splitter acc (s : string) =
+                match s.IndexOf("\\") with
+                    | -1 -> s::acc
+                    | p -> string_splitter (s.Substring(0, p)::acc) (s.Substring(p + 1)) 
+            Multi (string_splitter [] value)
             
 //------------------------------------------------------------------------------------------------------------
 
 let private to_string (a : byte[]) = 
-    if a.Length = 0
-    then None
-    else Some (Utils.decode_string a)
+    match a.Length with
+        | 0 -> None
+        | _ -> Some (Utils.decode_string a)
 
 //------------------------------------------------------------------------------------------------------------
     
@@ -142,13 +142,13 @@ let parse (preamble, elements) =
         | Lexer.VR.PN -> to_split_string value |> PN
         | Lexer.VR.SH -> to_split_string value |> SH
         | Lexer.VR.SL -> to_split_string value |> SL
-        | Lexer.VR.SS -> binary_parser value 2 (fun x -> BitConverter.ToInt16(x,0)) |> SS
+        | Lexer.VR.SS -> binary_parser value 2 (fun x -> BitConverter.ToInt16(x, 0)) |> SS
         | Lexer.VR.ST -> to_string value |> ST
         | Lexer.VR.TM -> to_split_string' value to_time |> TM
         | Lexer.VR.UI -> to_split_string value |> UI
         | Lexer.VR.UL -> binary_parser value 4 (fun x -> BitConverter.ToUInt32(x, 0)) |> UL
         | Lexer.VR.UN -> to_string value |> UN
-        | Lexer.VR.US -> binary_parser value 2 (fun x -> BitConverter.ToUInt16(x,0)) |> US
+        | Lexer.VR.US -> binary_parser value 2 (fun x -> BitConverter.ToUInt16(x, 0)) |> US
         | Lexer.VR.UT -> to_split_string value |> UT
         | _ -> failwith "Unknown Simple VR"
     
