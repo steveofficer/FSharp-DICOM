@@ -51,7 +51,7 @@ type VR =
 
 /// DataElement has 2 cases:
 ///    1. Simple: A basic DICOM value consisting of a Tag, a VR and a byte[] that represents the underlying value.
-///    2. Comple: The equivalent so an SQ DICOM VR, it is a list of sub-DICOM datasets.
+///    2. Complex: The equivalent of an SQ DICOM VR, it is a list of "sub" datasets.
 type DataElement = 
     | Simple of uint32 * VR * byte[] 
     | Complex of uint32 * DataElement list list
@@ -63,7 +63,7 @@ type DataElement =
 type ByteReaderBuilder()=
     member this.Bind(a, f) = 
         match a with
-            | -1 -> Failure "Tried to read beyond end of stream"
+            | -1 -> Failure "Tried to read beyond the end of the stream"
             | _ -> f a
 
     member this.Return(a) = Success a
@@ -191,12 +191,12 @@ type private BigEndianByteReader(source_stream : System.IO.Stream) =
                 target.[x+1] <- src.[x]
             target
 
-        if number % 2 = 1
-        then return! Failure "The number of bytes to read must be even when doing byte swapping"
-        else 
-            let! bytes = this.ReadBytes number
-            let target = Array.create number 0uy
-            return populate_buff bytes target
+        match number &&& 1 with
+            | 0 ->
+                let! bytes = this.ReadBytes number
+                let target = Array.create number 0uy
+                return populate_buff bytes target
+            | _ -> return! Failure "The number of bytes to read must be even when doing byte swapping"
     }
     
     member private this.ReadLittleEndianBytes number = result_reader {
@@ -343,8 +343,8 @@ let read (data_stream : Stream) tag_dict = result_reader {
         |> function
             | Some x ->
                 match x with
-                | Simple (_,_,value) -> Success (Utils.decode_string value)
-                | _ -> Failure "Transfer Syntax must be simple VR type"
+                    | Simple (_,_,value) -> Success (Utils.decode_string value)
+                    | _ -> Failure "Transfer Syntax must be simple VR type"
             | None -> Failure "The Transfer Syntax tag could not be found"
     
     let! little_endian, implicit_vr = 
