@@ -12,40 +12,40 @@ open System
 /// you to handle the Failure case. Whereas, the compiler wont force you to handle the exception.
 /// Additionally, parsing a malformed DICOM source is not considered to be "exceptional" or unexpected.
 type 'a Result =
-| Success of 'a
-| Failure of string
+    | Success of 'a
+    | Failure of string
 
 //------------------------------------------------------------------------------------------------------------
 
 /// This represents the type of the data that has been read from the source.
 type VR =
-| AE = 0 
-| AS = 1 
-| AT = 2 
-| CS = 3 
-| DA = 4 
-| DS = 5 
-| DT = 6 
-| FL = 7 
-| FD = 8 
-| IS = 9 
-| LO = 10 
-| LT = 11
-| OB = 12 
-| OF = 13 
-| OW = 14 
-| PN = 15 
-| SH = 16
-| SL = 17 
-| SQ = 18 
-| SS = 19 
-| ST = 20 
-| TM = 21 
-| UI = 22
-| UL = 23 
-| UN = 24 
-| US = 25 
-| UT = 26 
+    | AE = 0 
+    | AS = 1 
+    | AT = 2 
+    | CS = 3 
+    | DA = 4 
+    | DS = 5 
+    | DT = 6 
+    | FL = 7 
+    | FD = 8 
+    | IS = 9 
+    | LO = 10 
+    | LT = 11
+    | OB = 12 
+    | OF = 13 
+    | OW = 14 
+    | PN = 15 
+    | SH = 16
+    | SL = 17 
+    | SQ = 18 
+    | SS = 19 
+    | ST = 20 
+    | TM = 21 
+    | UI = 22
+    | UL = 23 
+    | UN = 24 
+    | US = 25 
+    | UT = 26 
 
 //------------------------------------------------------------------------------------------------------------
 
@@ -53,8 +53,8 @@ type VR =
 ///    1. Simple: A basic DICOM value consisting of a Tag, a VR and a byte[] that represents the underlying value.
 ///    2. Comple: The equivalent so an SQ DICOM VR, it is a list of sub-DICOM datasets.
 type DataElement = 
-| Simple of uint32 * VR * byte[] 
-| Complex of uint32 * DataElement list list
+    | Simple of uint32 * VR * byte[] 
+    | Complex of uint32 * DataElement list list
 
 //------------------------------------------------------------------------------------------------------------
 
@@ -63,8 +63,8 @@ type DataElement =
 type ByteReaderBuilder()=
     member this.Bind(a, f) = 
         match a with
-        | -1 -> Failure "Tried to read beyond end of stream"
-        | _ -> f a
+            | -1 -> Failure "Tried to read beyond end of stream"
+            | _ -> f a
 
     member this.Return(a) = Success a
     
@@ -81,8 +81,8 @@ type ResultReaderBuilder() =
     
     member this.Bind(a : 'a Result, f : 'a -> 'b Result) = 
         match a with
-        | Failure x -> Failure x
-        | Success x -> f x
+            | Failure x -> Failure x
+            | Success x -> f x
 
     member this.Return(a) = Success a
     
@@ -221,15 +221,15 @@ type private BigEndianByteReader(source_stream : System.IO.Stream) =
     override this.ReadVRValue vr size = result_reader {
         let (|ByteSwapped|ToLittleEndian|Unmodified|) = 
             function
-            | VR.AT | VR.OB | VR.OF | VR.OW -> ByteSwapped
-            | VR.SL | VR.SS | VR.US | VR.UL  -> ToLittleEndian
-            | _ -> Unmodified 
+                | VR.AT | VR.OB | VR.OF | VR.OW -> ByteSwapped
+                | VR.SL | VR.SS | VR.US | VR.UL  -> ToLittleEndian
+                | _ -> Unmodified 
             
         return! 
             match vr with
-            | ByteSwapped -> this.ReadSwappedBytes size
-            | ToLittleEndian -> this.ReadLittleEndianBytes size
-            | Unmodified -> this.ReadBytes size
+                | ByteSwapped -> this.ReadSwappedBytes size
+                | ToLittleEndian -> this.ReadLittleEndianBytes size
+                | Unmodified -> this.ReadBytes size
     }
      
 //------------------------------------------------------------------------------------------------------------
@@ -245,13 +245,11 @@ let private read_implicit_vr_element tag_dict (r : ByteReader) = result_reader {
 //------------------------------------------------------------------------------------------------------------
 
 let private read_explicit_vr_element (r : ByteReader) = result_reader {
-    let determine_value_length = 
-        let (|PaddedSpecialLengthVR|PaddedExplicitLengthVR|UnpaddedVR|) = function
-            | VR.OB | VR.OW | VR.OF | VR.SQ | VR.UN -> PaddedSpecialLengthVR
-            | VR.UT -> PaddedExplicitLengthVR
-            | _ -> UnpaddedVR
-        
-        function
+    let (|PaddedSpecialLengthVR|PaddedExplicitLengthVR|UnpaddedVR|) = function
+        | VR.OB | VR.OW | VR.OF | VR.SQ | VR.UN -> PaddedSpecialLengthVR
+        | VR.UT -> PaddedExplicitLengthVR
+        | _ -> UnpaddedVR
+    let determine_value_length = function
         | PaddedExplicitLengthVR -> 
             result_reader {
                 let! reserved = r.ReadBytes(2)
@@ -286,30 +284,32 @@ let private read_explicit_vr_element (r : ByteReader) = result_reader {
 let private read_elements f (acc : DataElement list) (r : ByteReader) : DataElement list Result = 
     let rec reader result =
         if r.EOS
-        then Success acc
+        then Success result
         else
             match f r with
-            | Failure reason -> Failure reason
-            | Success (tag, vr, value) ->
-                if vr = VR.SQ 
-                then reader (Complex(tag, [])::acc)
-                else reader (Simple(tag, vr, value)::acc)
+                | Failure reason -> Failure reason
+                | Success (tag, vr, value) ->
+                    if vr = VR.SQ 
+                    then reader (Complex(tag, [])::result)
+                    else reader (Simple(tag, vr, value)::result)
     reader acc
             
 //------------------------------------------------------------------------------------------------------------
 
 let private read_meta_information data = result_reader {
+    let inline to_int (a : byte[]) = (int(a.[3]) <<< 24) ||| (int(a.[2]) <<< 16) ||| (int(a.[1]) <<< 8) ||| int(a.[0])
+    
     // Find out what the length of the header is and then read the bytes that comprise the header
     let reader = LittleEndianByteReader data
-    let! (length_tag, length_vr, length_value : byte[]) = read_explicit_vr_element reader
-    let length = 
-        (int(length_value.[3]) <<< 24) ||| (int(length_value.[2]) <<< 16) ||| (int(length_value.[1]) <<< 8) ||| int(length_value.[0])
+    let! (length_tag, length_vr, raw_length : byte[]) = read_explicit_vr_element reader
+    let length = raw_length |> to_int
+        
     let! value = reader.ReadBytes(length)
     
     // Now read the bytes that represent the header
     use meta_info_stream = new MemoryStream(value)
     let! meta_info = read_elements read_explicit_vr_element [] (LittleEndianByteReader(meta_info_stream))
-    return Simple(length_tag, length_vr, length_value)::meta_info
+    return Simple(length_tag, length_vr, raw_length)::meta_info
 }
 
 //------------------------------------------------------------------------------------------------------------
@@ -322,15 +322,13 @@ let private read_preamble (data_stream : Stream) =
         let marker = Array.create 4 0uy
         data_stream.Read(marker, 0, 4) |> ignore
         match Utils.decode_string marker with
-        | "DICM" -> Success(preamble)
-        | _ -> Failure "The DICM tag was not found."
+            | "DICM" -> Success(preamble)
+            | _ -> Failure "The DICM tag was not found."
     else Failure "The stream does not contain enough data to be a valid DICOM file."
 
 //------------------------------------------------------------------------------------------------------------
 
 let read (data_stream : Stream) tag_dict = result_reader {
-    data_stream.Position <- 0L
-    
     let! preamble = read_preamble data_stream
     
     let! meta_info = read_meta_information data_stream
@@ -357,10 +355,10 @@ let read (data_stream : Stream) tag_dict = result_reader {
             | "1.2.840.10008.1.2.2" -> BigEndianExplicitVR
             | _ -> Unknown
         match transfer_syntax with
-        | BigEndianExplicitVR -> Success (false, false)
-        | LittleEndianExplicitVR -> Success (true, false)
-        | LittleEndianImplicitVR -> Success (true, true)
-        | Unknown -> Failure (sprintf "%s is an unknown transfer syntax" transfer_syntax)
+            | BigEndianExplicitVR -> Success (false, false)
+            | LittleEndianExplicitVR -> Success (true, false)
+            | LittleEndianImplicitVR -> Success (true, true)
+            | Unknown -> Failure (sprintf "%s is an unknown transfer syntax" transfer_syntax)
         
     let! data_set = 
         read_elements 
