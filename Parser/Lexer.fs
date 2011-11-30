@@ -54,7 +54,7 @@ type VR =
 ///    2. Complex: The equivalent of an SQ DICOM VR, it is a list of "sub" datasets.
 type DataElement = 
     | Simple of uint32 * VR * byte[] 
-    | Complex of uint32 * DataElement list list
+    | Sequence of uint32 * DataElement list list
 
 //------------------------------------------------------------------------------------------------------------
 
@@ -98,6 +98,8 @@ let result_reader = ResultReaderBuilder()
 /// Contains functions for reading bytes and other required types from DICOM data
 [<AbstractClass>]
 type private ByteReader(source_stream : System.IO.Stream) =
+    let stream_length = source_stream.Length
+    
     abstract member ReadUInt16 : unit -> uint16 Result
     abstract member ReadInt32 : unit -> int Result
     abstract member ReadVRValue : VR -> int -> byte[] Result
@@ -119,7 +121,7 @@ type private ByteReader(source_stream : System.IO.Stream) =
         return uint32(group) <<< 16 ||| uint32(element)
     }  
 
-    member this.EOS = source_stream.Position >= source_stream.Length
+    member this.EOS = source_stream.Position >= stream_length
 
     member this.ReadVR() = result_reader {
         let! char1 = this.ReadByte()
@@ -185,17 +187,19 @@ type private BigEndianByteReader(source_stream : System.IO.Stream) =
     inherit ByteReader(source_stream)
     
     member private this.ReadSwappedBytes number = result_reader {
-        let populate_buff (src : byte[]) (target : byte[]) =
-            for x in [0..2..number-1] do
-                target.[x] <- src.[x+1]
-                target.[x+1] <- src.[x]
-            target
+        let rec swapper (src : byte[]) i =
+            if i = number
+            then src
+            else 
+                let temp = src.[i]
+                src.[i] <- src.[i+1]
+                src.[i+1] <- temp
+                swapper src (i + 2)
 
         match number &&& 1 with
             | 0 ->
                 let! bytes = this.ReadBytes number
-                let target = Array.create number 0uy
-                return populate_buff bytes target
+                return swapper bytes 0
             | _ -> return! Failure "The number of bytes to read must be even when doing byte swapping"
     }
     
@@ -234,7 +238,7 @@ type private BigEndianByteReader(source_stream : System.IO.Stream) =
      
 //------------------------------------------------------------------------------------------------------------
 
-let private read_implicit_vr_element tag_dict (r : ByteReader) = result_reader {
+let private implicit_vr_data_element tag_dict (r : ByteReader) = result_reader {
     let! tag = r.ReadTag()
     let! vr = tag_dict tag
     let! length = r.ReadInt32()
@@ -244,7 +248,7 @@ let private read_implicit_vr_element tag_dict (r : ByteReader) = result_reader {
 
 //------------------------------------------------------------------------------------------------------------
 
-let private read_explicit_vr_element (r : ByteReader) = result_reader {
+let private explicit_vr_data_element (r : ByteReader) = result_reader {
     let (|PaddedSpecialLengthVR|PaddedExplicitLengthVR|UnpaddedVR|) = function
         | VR.OB | VR.OW | VR.OF | VR.SQ | VR.UN -> PaddedSpecialLengthVR
         | VR.UT -> PaddedExplicitLengthVR
@@ -254,9 +258,12 @@ let private read_explicit_vr_element (r : ByteReader) = result_reader {
             result_reader {
                 let! reserved = r.ReadBytes(2)
                 // According to Part5 7.1.2 this length is actually an unsigned 32 bit integer.
-                // However we cannot allocate objects larger than 2GB, so we might need to
-                // do 2 reads and return a sequence of bytes?
-                return! r.ReadInt32()
+                // However we cannot allocate objects larger than 2GB on the CLR.
+                // For now we fail.
+                let! length = r.ReadInt32()
+                if length < 0
+                then return! Failure "The parser only supports data element values that are less than 2GB in size."
+                else return length
             }
         | PaddedSpecialLengthVR -> 
             result_reader {
@@ -264,7 +271,10 @@ let private read_explicit_vr_element (r : ByteReader) = result_reader {
                 // According to Part5 7.1.2 this length is actually an unsigned 32 bit integer.
                 // Additionally, it might not be an explicit length, for example for SQ it might be delimited
                 // values until the End Of Sequence marker.
-                return! r.ReadInt32()
+                let! length = r.ReadInt32()
+                if length < 0
+                then return! Failure "The parser only supports data element values that are less than 2GB in size."
+                else return length
             }
         | UnpaddedVR -> 
             result_reader { 
@@ -281,18 +291,25 @@ let private read_explicit_vr_element (r : ByteReader) = result_reader {
 
 //------------------------------------------------------------------------------------------------------------
 
-let private read_elements f (acc : DataElement list) (r : ByteReader) : DataElement list Result = 
-    let rec reader result =
-        if r.EOS
+let private read_elements read_item (existing_items : DataElement list) (source : ByteReader) : DataElement list Result = 
+    let rec perform_read result =
+        if source.EOS
         then Success result
         else
-            match f r with
+            match read_item source with
                 | Failure reason -> Failure reason
                 | Success (tag, vr, value) ->
                     if vr = VR.SQ 
-                    then reader (Complex(tag, [])::result)
-                    else reader (Simple(tag, vr, value)::result)
-    reader acc
+                    then 
+                        // 1. iterate through each item (each item is a set of dicom tags) this is done by looking for
+                        //    delimeters and reading the bytes between each delimeter this is done until the 
+                        //    end of sequence marker is reached.
+                        // 2. perform read_elements on each item
+                        // 3. collect the result of read_elements into a list
+                        // 4. Create a Complex(tag, resulting_list)::result
+                        perform_read (Sequence(tag, [])::result)
+                    else perform_read (Simple(tag, vr, value)::result)
+    perform_read existing_items
             
 //------------------------------------------------------------------------------------------------------------
 
@@ -301,14 +318,14 @@ let private read_meta_information data = result_reader {
     
     // Find out what the length of the header is and then read the bytes that comprise the header
     let reader = LittleEndianByteReader data
-    let! (length_tag, length_vr, raw_length : byte[]) = read_explicit_vr_element reader
+    let! (length_tag, length_vr, raw_length : byte[]) = explicit_vr_data_element reader
     let length = raw_length |> to_int
         
     let! value = reader.ReadBytes(length)
     
     // Now read the bytes that represent the header
     use meta_info_stream = new MemoryStream(value)
-    let! meta_info = read_elements read_explicit_vr_element [] (LittleEndianByteReader(meta_info_stream))
+    let! meta_info = read_elements explicit_vr_data_element [] (LittleEndianByteReader(meta_info_stream))
     return Simple(length_tag, length_vr, raw_length)::meta_info
 }
 
@@ -334,21 +351,15 @@ let read (data_stream : Stream) tag_dict = result_reader {
     let! meta_info = read_meta_information data_stream
     
     let! transfer_syntax = 
-        List.tryFind
-            (function
-                | Simple(tag,_,_) -> tag = Tags.TransferSyntaxUID
-                | _ -> false
-            )
-            meta_info
+        List.tryFind (function | Simple(tag,_,_) -> tag = 131088u | _ -> false) meta_info
         |> function
             | Some x ->
                 match x with
                     | Simple (_,_,value) -> Success (Utils.decode_string value)
-                    | _ -> Failure "Transfer Syntax must be simple VR type"
+                    | Sequence(_,_) -> Failure "Transfer Syntax is not a Sequence VR Type"
             | None -> Failure "The Transfer Syntax tag could not be found"
     
     let! little_endian, implicit_vr = 
-        // Set up an active pattern so that we can do some pattern matching on the TransferSyntax
         let (|LittleEndianExplicitVR|LittleEndianImplicitVR|BigEndianExplicitVR|Unknown|) = function
             | "1.2.840.10008.1.2.1" -> LittleEndianExplicitVR
             | "1.2.840.10008.1.2" -> LittleEndianImplicitVR
@@ -363,8 +374,8 @@ let read (data_stream : Stream) tag_dict = result_reader {
     let! data_set = 
         read_elements 
             (if implicit_vr 
-                then read_implicit_vr_element tag_dict 
-                else read_explicit_vr_element
+                then implicit_vr_data_element tag_dict 
+                else explicit_vr_data_element
             ) 
             meta_info
             (if little_endian 

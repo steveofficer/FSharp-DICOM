@@ -154,7 +154,7 @@ let parse (preamble, elements) =
     
     let rec converter = function
         | Lexer.Simple (tag, vr, value) -> (tag, parse_simple_element value vr)
-        | Lexer.Complex (tag, elements) -> (tag, List.map create_vr_map elements |> Some |> SQ)
+        | Lexer.Sequence (tag, elements) -> (tag, List.map create_vr_map elements |> Some |> SQ)
     and create_vr_map elements = new Map<uint32, VR>(List.map converter elements)
     
     { Preamble = preamble; Values = create_vr_map elements }
