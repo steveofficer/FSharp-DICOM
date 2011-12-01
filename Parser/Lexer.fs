@@ -51,7 +51,7 @@ type VR =
 
 /// DataElement has 2 cases:
 ///    1. Simple: A basic DICOM value consisting of a Tag, a VR and a byte[] that represents the underlying value.
-///    2. Complex: The equivalent of an SQ DICOM VR, it is a list of "sub" datasets.
+///    2. Sequence: The equivalent of an SQ DICOM VR, it is a list of "sub" datasets.
 type DataElement = 
     | Simple of uint32 * VR * byte[] 
     | Sequence of uint32 * DataElement list list
@@ -307,6 +307,8 @@ let private read_elements read_item (existing_items : DataElement list) (source 
                         // 2. perform read_elements on each item
                         // 3. collect the result of read_elements into a list
                         // 4. Create a Complex(tag, resulting_list)::result
+                        // 5. This can be done lazily because we already have the byte[], we aren't dependent 
+                        // on the stream
                         perform_read (Sequence(tag, [])::result)
                     else perform_read (Simple(tag, vr, value)::result)
     perform_read existing_items
