@@ -58,20 +58,6 @@ type DataElement =
 
 //------------------------------------------------------------------------------------------------------------
 
-/// A computation expression used for reading bytes from the stream. As long as bytes can be read the computation
-/// will progress. If a byte cannot be read then Failure is returned by the computation.
-type ByteReaderBuilder()=
-    member this.Bind(a, f) = 
-        match a with
-            | -1 -> Failure "Tried to read beyond the end of the stream"
-            | _ -> f a
-
-    member this.Return(a) = Success a
-    
-    member this.ReturnFrom(a : 'a Result) = a
-    
-//------------------------------------------------------------------------------------------------------------
-
 /// A computation expression used for progressing through a series of expressions that return Result. 
 /// As long as the operations return Success, the computation will proceed.
 type ResultReaderBuilder() = 
@@ -90,8 +76,7 @@ type ResultReaderBuilder() =
 
 //------------------------------------------------------------------------------------------------------------
     
-let byte_reader = ByteReaderBuilder()
-let result_reader = ResultReaderBuilder()
+let operation = ResultReaderBuilder()
 
 //------------------------------------------------------------------------------------------------------------
 
@@ -104,10 +89,10 @@ type private ByteReader(source_stream : System.IO.Stream) =
     abstract member ReadInt32 : unit -> int Result
     abstract member ReadVRValue : VR -> int -> byte[] Result
     
-    member this.ReadByte() = byte_reader {
-        let! b = source_stream.ReadByte()
-        return byte(b)
-    }
+    member this.ReadByte() = 
+        match source_stream.ReadByte() with
+            | -1 -> Failure "An attempt was made to read beyond the end of the stream"
+            | b -> Success (byte(b))
     
     member this.ReadBytes number = 
         let buffer = Array.create number 0uy
@@ -115,7 +100,7 @@ type private ByteReader(source_stream : System.IO.Stream) =
         then Success buffer
         else Failure (sprintf "Could not read %i bytes from the stream" number)
     
-    member this.ReadTag() = result_reader {
+    member this.ReadTag() = operation {
         let! group = this.ReadUInt16() 
         let! element = this.ReadUInt16()
         return uint32(group) <<< 16 ||| uint32(element)
@@ -123,7 +108,7 @@ type private ByteReader(source_stream : System.IO.Stream) =
 
     member this.EOS = source_stream.Position >= stream_length
 
-    member this.ReadVR() = result_reader {
+    member this.ReadVR() = operation {
         let! char1 = this.ReadByte()
         let! char2 = this.ReadByte()
         return! Utils.decode_string ([| char1; char2 |])
@@ -166,18 +151,18 @@ type private ByteReader(source_stream : System.IO.Stream) =
 type private LittleEndianByteReader(source_stream : System.IO.Stream) =
     inherit ByteReader(source_stream)
     
-    override this.ReadUInt16() = byte_reader {
-        let! lower = source_stream.ReadByte() 
-        let! upper = source_stream.ReadByte()
+    override this.ReadUInt16() = operation {
+        let! lower = this.ReadByte() 
+        let! upper = this.ReadByte()
         return (uint16(upper) <<< 8) ||| uint16(lower) 
     }
 
-    override this.ReadInt32() = byte_reader {
-        let! b1 = source_stream.ReadByte() 
-        let! b2 = source_stream.ReadByte()
-        let! b3 = source_stream.ReadByte()
-        let! b4 = source_stream.ReadByte()
-        return b1 ||| (b2 <<< 8) ||| (b3 <<< 16) ||| (b4 <<< 24)
+    override this.ReadInt32() = operation {
+        let! b1 = this.ReadByte() 
+        let! b2 = this.ReadByte()
+        let! b3 = this.ReadByte()
+        let! b4 = this.ReadByte()
+        return int32(b1) ||| (int32(b2) <<< 8) ||| (int32(b3) <<< 16) ||| (int32(b4) <<< 24)
     }
 
 //------------------------------------------------------------------------------------------------------------
@@ -186,7 +171,7 @@ type private LittleEndianByteReader(source_stream : System.IO.Stream) =
 type private BigEndianByteReader(source_stream : System.IO.Stream) =
     inherit ByteReader(source_stream)
     
-    member private this.ReadSwappedBytes number = result_reader {
+    member private this.ReadSwappedBytes number = operation {
         let rec swapper (src : byte[]) i =
             if i = number
             then src
@@ -203,26 +188,26 @@ type private BigEndianByteReader(source_stream : System.IO.Stream) =
             | _ -> return! Failure "The number of bytes to read must be even when doing byte swapping"
     }
     
-    member private this.ReadLittleEndianBytes number = result_reader {
+    member private this.ReadLittleEndianBytes number = operation {
         let! bytes = this.ReadBytes number
         return Array.rev bytes
     }
     
-    override this.ReadUInt16() = byte_reader {
-        let! upper = source_stream.ReadByte() 
-        let! lower = source_stream.ReadByte()
+    override this.ReadUInt16() = operation {
+        let! upper = this.ReadByte() 
+        let! lower = this.ReadByte()
         return (uint16(upper) <<< 8) ||| uint16(lower)
     }
 
-    override this.ReadInt32() = byte_reader {
-        let! b1 = source_stream.ReadByte()
-        let! b2 = source_stream.ReadByte()
-        let! b3 = source_stream.ReadByte()
-        let! b4 = source_stream.ReadByte()
-        return (b1 <<< 24) ||| (b2 <<< 16) ||| (b3 <<< 8) ||| b4
+    override this.ReadInt32() = operation {
+        let! b1 = this.ReadByte()
+        let! b2 = this.ReadByte()
+        let! b3 = this.ReadByte()
+        let! b4 = this.ReadByte()
+        return (int32(b1) <<< 24) ||| (int32(b2) <<< 16) ||| (int32(b3) <<< 8) ||| int32(b4)
     }
     
-    override this.ReadVRValue vr size = result_reader {
+    override this.ReadVRValue vr size = operation {
         let (|ByteSwapped|ToLittleEndian|Unmodified|) = 
             function
                 | VR.AT | VR.OB | VR.OF | VR.OW -> ByteSwapped
@@ -238,7 +223,7 @@ type private BigEndianByteReader(source_stream : System.IO.Stream) =
      
 //------------------------------------------------------------------------------------------------------------
 
-let private implicit_vr_data_element tag_dict (r : ByteReader) = result_reader {
+let private implicit_vr_data_element tag_dict (r : ByteReader) = operation {
     let! tag = r.ReadTag()
     let! vr = tag_dict tag
     let! length = r.ReadInt32()
@@ -248,14 +233,14 @@ let private implicit_vr_data_element tag_dict (r : ByteReader) = result_reader {
 
 //------------------------------------------------------------------------------------------------------------
 
-let private explicit_vr_data_element (r : ByteReader) = result_reader {
+let private explicit_vr_data_element (r : ByteReader) = operation {
     let (|PaddedSpecialLengthVR|PaddedExplicitLengthVR|UnpaddedVR|) = function
         | VR.OB | VR.OW | VR.OF | VR.SQ | VR.UN -> PaddedSpecialLengthVR
         | VR.UT -> PaddedExplicitLengthVR
         | _ -> UnpaddedVR
     let determine_value_length = function
         | PaddedExplicitLengthVR -> 
-            result_reader {
+            operation {
                 let! reserved = r.ReadBytes(2)
                 // According to Part5 7.1.2 this length is actually an unsigned 32 bit integer.
                 // However we cannot allocate objects larger than 2GB on the CLR.
@@ -266,7 +251,7 @@ let private explicit_vr_data_element (r : ByteReader) = result_reader {
                 else return length
             }
         | PaddedSpecialLengthVR -> 
-            result_reader {
+            operation {
                 let! reserved = r.ReadBytes(2)
                 // According to Part5 7.1.2 this length is actually an unsigned 32 bit integer.
                 // Additionally, it might not be an explicit length, for example for SQ it might be delimited
@@ -277,7 +262,7 @@ let private explicit_vr_data_element (r : ByteReader) = result_reader {
                 else return length
             }
         | UnpaddedVR -> 
-            result_reader { 
+            operation { 
                 let! result = r.ReadUInt16()
                 return int(result)
             }
@@ -315,7 +300,7 @@ let private read_elements read_item (existing_items : DataElement list) (source 
             
 //------------------------------------------------------------------------------------------------------------
 
-let private read_meta_information data = result_reader {
+let private read_meta_information data = operation {
     let inline to_int (a : byte[]) = (int(a.[3]) <<< 24) ||| (int(a.[2]) <<< 16) ||| (int(a.[1]) <<< 8) ||| int(a.[0])
     
     // Find out what the length of the header is and then read the bytes that comprise the header
@@ -347,7 +332,7 @@ let private read_preamble (data_stream : Stream) =
 
 //------------------------------------------------------------------------------------------------------------
 
-let read (data_stream : Stream) tag_dict = result_reader {
+let read (data_stream : Stream) tag_dict = operation {
     let! preamble = read_preamble data_stream
     
     let! meta_info = read_meta_information data_stream
