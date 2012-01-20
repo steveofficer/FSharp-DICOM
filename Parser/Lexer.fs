@@ -206,13 +206,14 @@ let private explicit_vr_data_element (r : ByteReader) = operation {
         | _ -> Explicit
         
     let parse_sequence() = operation {
-        let rec reader acc = operation {
-            let! b = r.ReadByte()
-            let result = b::acc
-            match result with
-                | 221uy::224uy::238uy::255uy::t -> return List.rev t
-                | _ -> return! reader result
-        }
+        let rec reader acc = 
+            match r.ReadByte() with
+                | Success b ->
+                    let result = b::acc
+                    match result with
+                        | 221uy::224uy::238uy::255uy::t -> Success (List.rev t)
+                        | _ -> reader result
+                | Failure reason -> Failure reason
         let! result = reader []
         return List.toArray result
     }
