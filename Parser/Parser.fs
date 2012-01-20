@@ -58,7 +58,11 @@ let private to_date (s : string) =
 //------------------------------------------------------------------------------------------------------------
 
 let private to_time (s : string) = 
-    {Hours = UInt16.Parse(s.[0..1]); Minutes = UInt16.Parse(s.[2..3]); Seconds = UInt16.Parse(s.[4..5]); FSeconds = uint16(1)}
+    let hours = UInt16.Parse(s.[0..1])
+    let minutes = UInt16.Parse(s.[2..3])
+    let seconds = UInt16.Parse(s.[4..5])
+    let fractional = uint16(1)
+    { Hours = hours; Minutes = minutes; Seconds = seconds; FSeconds = fractional }
 
 //------------------------------------------------------------------------------------------------------------
 

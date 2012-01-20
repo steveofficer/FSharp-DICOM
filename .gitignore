@@ -1,3 +1,5 @@
 Parser/bin/
 Parser/obj/
+ParserProgram/bin/
+ParserProgram/obj/
 *.suo
