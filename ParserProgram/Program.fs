@@ -7,7 +7,7 @@ let parse =
 
 let read_file (file_path : string) = async {
     use stream = new StreamReader(file_path)
-    return Lexer.read stream.BaseStream (fun x -> Lexer.Failure (sprintf "Tag %i is not recognized" x)) |> parse
+    return Lexer.Read stream.BaseStream (fun x -> Lexer.Failure (sprintf "Tag %i is not recognized" x)) |> parse
 }
 
 [<EntryPoint>]
