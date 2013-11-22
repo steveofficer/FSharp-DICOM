@@ -4,148 +4,141 @@
     open System
     open Utils
 
-    //------------------------------------------------------------------------------------------------------------
+    //--------------------------------------------------------------------------------------------------------
 
-    type 'a Result =
-        | Success of 'a
-        | Failure of string
+    type 'a ParseResult =
+        | Data of 'a
+        | Error of string
 
-    //------------------------------------------------------------------------------------------------------------
+    //--------------------------------------------------------------------------------------------------------
 
     type VR =
-        | AE = 0 
-        | AS = 1 
-        | AT = 2 
-        | CS = 3 
-        | DA = 4 
-        | DS = 5 
-        | DT = 6 
-        | FL = 7 
-        | FD = 8 
-        | IS = 9 
-        | LO = 10 
-        | LT = 11
-        | OB = 12 
-        | OF = 13 
-        | OW = 14 
-        | PN = 15 
-        | SH = 16
-        | SL = 17 
-        | SQ = 18 
-        | SS = 19 
-        | ST = 20 
-        | TM = 21 
-        | UI = 22
-        | UL = 23 
-        | UN = 24 
-        | US = 25 
-        | UT = 26 
+        | AE = 16709 // "AE"
+        | AS = 16723 // "AS"
+        | AT = 16724 // "AT"
+        | CS = 17235 // "CS"
+        | DA = 17473 // "DA"
+        | DS = 17491 // "DS"
+        | DT = 17492 // "DT"
+        | FL = 17996 // "FL"
+        | FD = 17988 // "FD"
+        | IS = 18771 // "IS"
+        | LO = 19535 // "LO"
+        | LT = 19540 // "LT"
+        | OB = 20290 // "OB"
+        | OF = 20294 // "OF"
+        | OW = 20311 // "OW"
+        | PN = 20558 // "PN"
+        | SH = 21320 // "SH"
+        | SL = 21324 // "SL"
+        | SQ = 21329 // "SQ"
+        | SS = 21331 // "SS"
+        | ST = 21332 // "ST"
+        | TM = 21581 // "TM"
+        | UI = 21833 // "UI"
+        | UL = 21836 // "UL"
+        | UN = 21838 // "UN"
+        | US = 21843 // "US"
+        | UT = 21844 // "UT"
 
-    //------------------------------------------------------------------------------------------------------------
+    //--------------------------------------------------------------------------------------------------------
 
     type Endianness = 
         | Big = 0
         | Little = 1
 
-    //------------------------------------------------------------------------------------------------------------
+    //--------------------------------------------------------------------------------------------------------
 
     type VRType =
         | Implicit = 0
         | Explicit = 1
 
-    //------------------------------------------------------------------------------------------------------------
+    //--------------------------------------------------------------------------------------------------------
 
     type DataElement = 
         | Simple of uint32 * VR * byte[] 
-        | Sequence of uint32 * DataElement list list
+        | Sequence of uint32 * Lazy<DataElement list list>
 
-    //------------------------------------------------------------------------------------------------------------
+    //--------------------------------------------------------------------------------------------------------
 
-    type ResultBuilder() = 
-        member this.Using(a : 'a , f : ('a -> 'b Result)) : 'b Result when 'a :> IDisposable = 
+    type ParseResultBuilder() = 
+        member this.Using(a : 'a , f : ('a -> 'b ParseResult)) : 'b ParseResult when 'a :> IDisposable = 
             try f a
             finally a.Dispose()
     
-        member this.Bind(a : 'a Result, f : 'a -> 'b Result) = 
+        member this.Bind(a : 'a ParseResult, f : 'a -> 'b ParseResult) = 
             match a with
-                | Failure reason -> Failure reason
-                | Success x -> f x
+                | Data x -> f x
+                | Error reason -> Error reason
 
-        member this.Return(a) = Success a
+        member this.Return(a) = Data a
     
-        member this.ReturnFrom(a : 'a Result) = a
+        member this.ReturnFrom(a : 'a ParseResult) = a
 
-    //------------------------------------------------------------------------------------------------------------
+    //--------------------------------------------------------------------------------------------------------
     
-    let result = ResultBuilder()
+    let parser = ParseResultBuilder()
 
-    //------------------------------------------------------------------------------------------------------------
+    //--------------------------------------------------------------------------------------------------------
 
     [<AbstractClass>]
     type private ByteReader(source_stream : System.IO.Stream) =
         let stream_length = source_stream.Length
     
-        abstract member ReadUInt16 : unit -> uint16 Result
-        abstract member ReadInt32 : unit -> int Result
-        abstract member ReadVRValue : VR -> int -> byte[] Result
+        abstract member ReadUInt16 : unit -> uint16 ParseResult
+        abstract member ReadInt32 : unit -> int ParseResult
+        abstract member ReadVRValue : VR -> int -> byte[] ParseResult
     
         default this.ReadVRValue vr size = this.ReadBytes size
     
         member this.ReadByte() = 
             match source_stream.ReadByte() with
-                | -1 -> Failure "An attempt was made to read beyond the end of the stream"
-                | b -> Success (byte b)
+                | -1 -> Error "An attempt was made to read beyond the end of the stream"
+                | b -> Data (byte b)
     
         member this.ReadBytes number = 
-            let buffer = Array.create number 0uy
+            let buffer = Array.zeroCreate number
             match source_stream.Read(buffer, 0, number) with
-                | x when x = number -> Success buffer
-                | _ -> Failure "Could not read the requested number of bytes from the stream"
+                | x when x = number -> Data buffer
+                | _ -> Error "Could not read the requested number of bytes from the stream"
     
-        member this.ReadTag() = result {
+        member this.ReadTag() = parser {
             let! group = this.ReadUInt16() 
             let! element = this.ReadUInt16()
             return uint32(group) <<< 16 ||| uint32(element)
         }  
 
-        member this.EOS = source_stream.Position >= stream_length
+        member this.Ended = source_stream.Position >= stream_length
 
-        member this.ReadVR() = result {
-            let to_vr s = 
-                let result = ref VR.AE
-                if Enum.TryParse(s, result)
-                then Success !result
-                else Failure (sprintf "%s is not a recognized VR type" s)
-            let! char1 = this.ReadByte()
-            let! char2 = this.ReadByte()
-            return! decode_string ([| char1; char2 |]) |> to_vr
+        member this.ReadVR() = parser {
+            let! bytes = this.ReadBytes 2
+            let vr_type = (int32(bytes.[0]) <<< 8) ||| int32(bytes.[1])
+            if System.Enum.IsDefined(typeof<VR>, vr_type)
+            then return enum<VR>(vr_type)
+            else return! bytes |> decode_string |> sprintf "Unknown VR type %s" |> Error
         }
     
-    //------------------------------------------------------------------------------------------------------------
+    //--------------------------------------------------------------------------------------------------------
 
-    type private LittleEndianByteReader(source_stream : System.IO.Stream) =
+    type private LittleEndianByteReader(source_stream : System.IO.Stream) = 
         inherit ByteReader(source_stream)
     
-        override this.ReadUInt16() = result {
-            let! lower = this.ReadByte() 
-            let! upper = this.ReadByte()
-            return (uint16(upper) <<< 8) ||| uint16(lower) 
+        override this.ReadUInt16() = parser {
+            let! bytes = this.ReadBytes 2 
+            return (uint16(bytes.[1]) <<< 8) ||| uint16(bytes.[0]) 
         }
 
-        override this.ReadInt32() = result {
-            let! b1 = this.ReadByte() 
-            let! b2 = this.ReadByte()
-            let! b3 = this.ReadByte()
-            let! b4 = this.ReadByte()
-            return int32(b1) ||| (int32(b2) <<< 8) ||| (int32(b3) <<< 16) ||| (int32(b4) <<< 24)
+        override this.ReadInt32() = parser {
+            let! bytes = this.ReadBytes 4 
+            return (int32(bytes.[3]) <<< 24) ||| (int32(bytes.[2]) <<< 16) ||| (int32(bytes.[1]) <<< 8) ||| int32(bytes.[0])
         }
 
-    //------------------------------------------------------------------------------------------------------------
+    //--------------------------------------------------------------------------------------------------------
 
     type private BigEndianByteReader(source_stream : System.IO.Stream) =
         inherit ByteReader(source_stream)
     
-        member private this.ReadSwappedBytes number = result {
+        member private this.ReadSwappedBytes number = parser {
             let rec swapper (src : byte[]) i =
                 if i = number
                 then src
@@ -160,29 +153,25 @@
                 let! bytes = this.ReadBytes number
                 return swapper bytes 0
             else
-                return! Failure "The number of bytes to read must be even when doing byte swapping"
+                return! Error "The number of bytes to read must be even when doing byte swapping"
         }
     
-        member private this.ReadLittleEndianBytes number = result {
+        member private this.ReadLittleEndianBytes number = parser {
             let! bytes = this.ReadBytes number
             return Array.rev bytes
         }
     
-        override this.ReadUInt16() = result {
-            let! upper = this.ReadByte() 
-            let! lower = this.ReadByte()
-            return (uint16(upper) <<< 8) ||| uint16(lower)
+        override this.ReadUInt16() = parser {
+            let! bytes = this.ReadBytes 2 
+            return (uint16(bytes.[0]) <<< 8) ||| uint16(bytes.[1])
         }
 
-        override this.ReadInt32() = result {
-            let! b1 = this.ReadByte()
-            let! b2 = this.ReadByte()
-            let! b3 = this.ReadByte()
-            let! b4 = this.ReadByte()
-            return (int32(b1) <<< 24) ||| (int32(b2) <<< 16) ||| (int32(b3) <<< 8) ||| int32(b4)
+        override this.ReadInt32() = parser {
+            let! bytes = this.ReadBytes 4
+            return (int32(bytes.[0]) <<< 24) ||| (int32(bytes.[1]) <<< 16) ||| (int32(bytes.[2]) <<< 8) ||| int32(bytes.[3])
         }
     
-        override this.ReadVRValue vr size = result {
+        override this.ReadVRValue vr size = parser {
             let (|ByteSwapped|ToLittleEndian|Direct|) = 
                 function
                     | VR.AT | VR.OB | VR.OF | VR.OW -> ByteSwapped
@@ -196,64 +185,64 @@
                     | ToLittleEndian -> this.ReadLittleEndianBytes size
         }
      
-    //------------------------------------------------------------------------------------------------------------
+    //--------------------------------------------------------------------------------------------------------
 
-    let private implicit_vr_data_element tag_dict (r : ByteReader) = result {
+    let private implicit_vr_data_element tag_lookup (r : ByteReader) = parser {
         let! tag = r.ReadTag()
-        let! vr = tag_dict tag
+        let! vr = tag_lookup tag
         let! length = r.ReadInt32()
         let! value = r.ReadVRValue vr length
         return (tag, vr, value)
     }
 
-    //------------------------------------------------------------------------------------------------------------
+    //--------------------------------------------------------------------------------------------------------
 
-    let private explicit_vr_data_element (r : ByteReader) = result {
+    let private ``explicit vr data element`` (r : ByteReader) = parser {
         let (|PaddedLengthVR|PaddedExplicitLengthVR|UnpaddedVR|) = function
             | VR.OB | VR.OW | VR.OF | VR.SQ | VR.UN -> PaddedLengthVR
             | VR.UT -> PaddedExplicitLengthVR
             | _ -> UnpaddedVR
-    
+        
         let (|TooLong|Undefined|Explicit|) = function
-            | x when x = UInt32.MaxValue -> Undefined
+            | UInt32.MaxValue -> Undefined
             | x when x = uint32(Int32.MaxValue) -> TooLong
             | _ -> Explicit
         
-        let parse_sequence() = result {
-            let rec reader acc = 
-                match r.ReadByte() with
-                    | Success b ->
-                        let result = b::acc
-                        match result with
-                            | 221uy::224uy::238uy::255uy::t -> Success (List.rev t)
-                            | _ -> reader result
-                    | Failure reason -> Failure reason
+        let parse_sequence() = parser {
+            let rec reader acc = parser {
+                let! b = r.ReadByte()
+                let result = b::acc
+                match result with
+                    | 221uy::224uy::238uy::255uy::t -> return (List.rev t)
+                    | _ -> return! reader result
+            }
             let! result = reader []
             return List.toArray result
         }
     
+        let failure_message = "The current implementation only supports values that are less than 2GB in size."
         let read_value vr = 
             match vr with
                 | PaddedExplicitLengthVR -> 
-                    result {
+                    parser {
                         let! reserved = r.ReadBytes(2)
                         let! length = r.ReadInt32()
                         match uint32 length with
                             | Explicit -> return! r.ReadVRValue vr length
-                            | TooLong -> return! Failure "The current implementation only supports data element values that are less than 2GB in size."
-                            | Undefined -> return! Failure (sprintf "The %A VR does not support undefined length" vr)
+                            | TooLong -> return! Error failure_message
+                            | Undefined -> return! Error (sprintf "The %A VR does not support undefined length" vr)
                     }
                 | PaddedLengthVR -> 
-                    result {
+                    parser {
                         let! reserved = r.ReadBytes(2)
                         let! length = r.ReadInt32()
                         match uint32 length with
                             | Explicit -> return! r.ReadVRValue vr length
                             | Undefined -> return! parse_sequence()
-                            | TooLong -> return! Failure "The current implementation only supports data element values that are less than 2GB in size."
+                            | TooLong -> return! Error failure_message
                     }
                 | UnpaddedVR -> 
-                    result { 
+                    parser { 
                         let! result = r.ReadUInt16()
                         return! r.ReadVRValue vr (int(result))
                     }
@@ -264,107 +253,104 @@
         return (tag, vr, value)
     }
 
-    //------------------------------------------------------------------------------------------------------------
+    //--------------------------------------------------------------------------------------------------------
 
-    let private read_elements read_item (existing_items : DataElement list) (source : ByteReader) : DataElement list Result = 
-        let rec perform_read result =
-            if source.EOS
-            then Success result
+    let private ``read elements`` ``read element from`` (existing_items : DataElement list) (source : ByteReader) = parser {
+        let rec ``read next`` elements = parser {
+            if source.Ended
+            then return elements
             else
-                match read_item source with
-                    | Failure reason -> Failure reason
-                    | Success (tag, vr, value) ->
-                        if vr = VR.SQ 
-                        then 
-                            // 1. iterate through each item (each item is a set of dicom tags) this is done by looking for
-                            //    delimeters and reading the bytes between each delimeter this is done until the 
-                            //    end of sequence marker is reached.
-                            // 2. perform read_elements on each item
-                            // 3. collect the result of read_elements into a list
-                            // 4. Create a Complex(tag, resulting_list)::result
-                            // 5. This can be done lazily because we already have the byte[], we aren't dependent 
-                            // on the stream
-                            perform_read (Sequence(tag, [])::result)
-                        else perform_read (Simple(tag, vr, value)::result)
-        perform_read existing_items
+                let! (tag, vr, value) = ``read element from`` source
+                let element = 
+                    match vr with
+                        | VR.SQ -> Sequence(tag, lazy([])) // TODO: Extract the items from the byte sequence
+                        | _ -> Simple(tag, vr, value)
+                return! element::elements |> ``read next`` 
+        }
+        return! ``read next`` existing_items
+    }
             
-    //------------------------------------------------------------------------------------------------------------
+    //--------------------------------------------------------------------------------------------------------
 
-    let private read_meta_information data = result {
-        let inline to_int (a : byte[]) = (int(a.[3]) <<< 24) ||| (int(a.[2]) <<< 16) ||| (int(a.[1]) <<< 8) ||| int(a.[0])
+    let private ``read meta_information`` data = parser {
+        let inline le_to_int (a : byte[]) = (int(a.[3]) <<< 24) ||| (int(a.[2]) <<< 16) ||| (int(a.[1]) <<< 8) ||| int(a.[0])
     
         // Find out what the length of the header is and then read the bytes that comprise the header
         let reader = LittleEndianByteReader data
-        let! (length_tag, length_vr, raw_length : byte[]) = explicit_vr_data_element reader
-        let length = raw_length |> to_int
+        let! (length_tag, length_vr, raw_length : byte[]) = ``explicit vr data element`` reader
+        let value_length = raw_length |> le_to_int
         
-        let! value = reader.ReadBytes(length)
+        let! value = reader.ReadBytes(value_length)
     
         // Now read the bytes that represent the header
         use meta_info_stream = new MemoryStream(value)
-        let! meta_info = read_elements explicit_vr_data_element [] (LittleEndianByteReader meta_info_stream)
+        let! meta_info = ``read elements`` ``explicit vr data element`` [] (LittleEndianByteReader meta_info_stream)
         return Simple(length_tag, length_vr, raw_length)::meta_info
     }
 
-    //------------------------------------------------------------------------------------------------------------
+    //--------------------------------------------------------------------------------------------------------
 
-    let private read_preamble (data_stream : Stream) = 
+    let private ``read preamble`` (data_stream : Stream) = 
         if data_stream.Length > 132L
         then 
-            let preamble = Array.create 128 0uy
+            let preamble = Array.zeroCreate 128
             data_stream.Read(preamble, 0, 128) |> ignore
-            let marker = Array.create 4 0uy
-            data_stream.Read(marker, 0, 4) |> ignore
-            match decode_string marker with
-                | "DICM" -> Success(preamble)
-                | _ -> Failure "The DICM tag was not found."
-        else Failure "The stream does not contain enough data to be a valid DICOM file."
+            let dicm_marker = Array.zeroCreate 4
+            data_stream.Read(dicm_marker, 0, 4) |> ignore
+            match dicm_marker with
+                | [| 68uy; 73uy; 67uy; 77uy |] -> Data preamble
+                | _ -> Error "The DICM tag was not found."
+        else Error "The stream does not contain enough data to be a valid DICOM file."
 
-    //------------------------------------------------------------------------------------------------------------
+    //--------------------------------------------------------------------------------------------------------
 
-    let private determine_format elements = result {
+    let private ``determine format`` elements = parser {
         let find_transfer_syntax() = 
-            let is_transfer_syntax = 
-                function 
-                    | Simple(tag,_,_) -> tag = 131088u 
-                    | _ -> false
+            let is_transfer_syntax = function 
+                | Simple(tag,_,_) -> tag = 131088u 
+                | _ -> false
             
             match List.tryFind is_transfer_syntax elements with
-                | None -> Failure "The Transfer Syntax element could not be found"
+                | None -> Error "The Transfer Syntax element could not be found"
                 | Some transfer_syntax_element -> 
                     match transfer_syntax_element with
-                        | Simple (_, _, transfer_syntax) -> Success (decode_string transfer_syntax)
-                        | _ -> Failure "Transfer Syntax is expected to be a Simple VR Type"
+                        | Simple (_, _, transfer_syntax) -> Data (decode_string transfer_syntax)
+                        | _ -> Error "Transfer Syntax is expected to be a Simple VR Type"
             
         let! transfer_syntax = find_transfer_syntax()
     
-        return!
-            match transfer_syntax with
-                | "1.2.840.10008.1.2.2" -> Success (Endianness.Big, VRType.Explicit)
-                | "1.2.840.10008.1.2.1" -> Success (Endianness.Little, VRType.Explicit)
-                | "1.2.840.10008.1.2" -> Success (Endianness.Little, VRType.Implicit)
-                | unknown -> Failure (sprintf "%s is an unknown transfer syntax" unknown)
+        match transfer_syntax with
+            | "1.2.840.10008.1.2.2" -> return (Endianness.Big, VRType.Explicit)
+            | "1.2.840.10008.1.2.1" -> return (Endianness.Little, VRType.Explicit)
+            | "1.2.840.10008.1.2" -> return (Endianness.Little, VRType.Implicit)
+            | unknown -> return! Error (sprintf "%s is an unknown transfer syntax" unknown)
     }
 
-    //------------------------------------------------------------------------------------------------------------
+    //--------------------------------------------------------------------------------------------------------
 
-    let Read (data_stream : Stream) tag_dict = result {
-        let! preamble = read_preamble data_stream
-        let! meta_info = read_meta_information data_stream
-        let! endianness, vr_type = determine_format meta_info
-        
-        let byte_reader = 
+    let private ``get element reader`` tag_dict data_stream endianness vr_type = parser {
+        let! byte_reader = 
             match endianness with
-                | Endianness.Little -> (LittleEndianByteReader data_stream) :> ByteReader 
-                | Endianness.Big -> (BigEndianByteReader data_stream) :> ByteReader
-                | _ -> failwith "Unknown endianness value"
+                | Endianness.Little -> Data ((LittleEndianByteReader data_stream) :> ByteReader)
+                | Endianness.Big -> Data ((BigEndianByteReader data_stream) :> ByteReader)
+                | _ -> Error "Unknown endianness value"
 
-        let element_reader = 
+        let! element_reader = 
             match vr_type with
-                | VRType.Implicit -> implicit_vr_data_element tag_dict 
-                | VRType.Explicit -> explicit_vr_data_element
-                | _ -> failwith "Unknown vr type"
+                | VRType.Implicit -> Data (implicit_vr_data_element tag_dict)
+                | VRType.Explicit -> Data ``explicit vr data element``
+                | _ -> Error "Unknown vr type"
 
-        let! data_set = read_elements element_reader meta_info byte_reader
+        return (byte_reader, element_reader)
+    }
+
+    //--------------------------------------------------------------------------------------------------------
+
+    let Read (data_stream : Stream) tag_dict = parser {
+        let! preamble = ``read preamble`` data_stream
+        let! meta_info = ``read meta_information`` data_stream
+        let! endianness, vr_type = ``determine format`` meta_info
+        let! byte_reader, element_reader = ``get element reader`` tag_dict data_stream endianness vr_type
+        let! data_set = ``read elements`` element_reader meta_info byte_reader
         return (preamble, data_set)
     }

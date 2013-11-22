@@ -2,12 +2,13 @@
 
 let parse = 
     function
-        | Lexer.Success (preamble, data_set) -> Parser.parse(preamble, data_set)
-        | Lexer.Failure reason -> failwith (sprintf "Failed: %s" reason)
+        | Lexer.Data (preamble, data_set) -> () //Parser.parse(preamble, data_set)
+        | Lexer.Error reason -> failwithf "Failed: %s" reason
 
 let read_file (file_path : string) = async {
+    let tag_dictionary tag = Lexer.Error (sprintf "Tag %i is not recognized" tag)
     use stream = new StreamReader(file_path)
-    return Lexer.Read stream.BaseStream (fun x -> Lexer.Failure (sprintf "Tag %i is not recognized" x)) |> parse
+    return Lexer.Read stream.BaseStream tag_dictionary |> parse
 }
 
 [<EntryPoint>]
@@ -22,4 +23,6 @@ let main (args : string[]) =
 
     printfn "Parsed : %i files" parsed.Length
     printfn "Took %A ms in total" timer.Elapsed.TotalMilliseconds
+
+    //parsed.[0].Values |> Map.iter (fun k v -> printfn "%A %A" k v)
     0
