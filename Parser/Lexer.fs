@@ -85,9 +85,9 @@
     type private ByteReader(source_stream : System.IO.Stream) =
         let stream_length = source_stream.Length
     
-        abstract member ReadUInt16 : unit -> uint16 ParseResult
-        abstract member ReadInt32 : unit -> int ParseResult
-        abstract member ReadVRValue : VR -> int -> byte[] ParseResult
+        abstract member ReadUInt16 : unit -> uint32 ParseResult
+        abstract member ReadUInt32 : unit -> uint32 ParseResult
+        abstract member ReadVRValue : VR -> uint32 -> byte[] ParseResult
     
         default this.ReadVRValue vr size = this.ReadBytes size
     
@@ -97,21 +97,22 @@
                 | b -> Data (byte b)
     
         member this.ReadBytes number = 
-            let buffer = Array.zeroCreate number
-            match source_stream.Read(buffer, 0, number) with
-                | x when x = number -> Data buffer
+            let count = int number
+            let buffer = Array.zeroCreate count
+            match source_stream.Read(buffer, 0, count) with
+                | x when x = count -> Data buffer
                 | _ -> Error "Could not read the requested number of bytes from the stream"
     
         member this.ReadTag() = parser {
             let! group = this.ReadUInt16() 
             let! element = this.ReadUInt16()
-            return uint32(group) <<< 16 ||| uint32(element)
+            return group <<< 16 ||| element
         }  
 
         member this.Ended = source_stream.Position >= stream_length
 
         member this.ReadVR() = parser {
-            let! bytes = this.ReadBytes 2
+            let! bytes = this.ReadBytes 2ul
             let vr_type = (int32(bytes.[0]) <<< 8) ||| int32(bytes.[1])
             if System.Enum.IsDefined(typeof<VR>, vr_type)
             then return enum<VR>(vr_type)
@@ -124,13 +125,13 @@
         inherit ByteReader(source_stream)
     
         override this.ReadUInt16() = parser {
-            let! bytes = this.ReadBytes 2 
-            return (uint16(bytes.[1]) <<< 8) ||| uint16(bytes.[0]) 
+            let! bytes = this.ReadBytes 2ul 
+            return (uint32(bytes.[1]) <<< 8) ||| uint32(bytes.[0]) 
         }
 
-        override this.ReadInt32() = parser {
-            let! bytes = this.ReadBytes 4 
-            return (int32(bytes.[3]) <<< 24) ||| (int32(bytes.[2]) <<< 16) ||| (int32(bytes.[1]) <<< 8) ||| int32(bytes.[0])
+        override this.ReadUInt32() = parser {
+            let! bytes = this.ReadBytes 4ul
+            return (uint32(bytes.[3]) <<< 24) ||| (uint32(bytes.[2]) <<< 16) ||| (uint32(bytes.[1]) <<< 8) ||| uint32(bytes.[0])
         }
 
     //--------------------------------------------------------------------------------------------------------
@@ -139,8 +140,9 @@
         inherit ByteReader(source_stream)
     
         member private this.ReadSwappedBytes number = parser {
+            let count = int number
             let rec swapper (src : byte[]) i =
-                if i = number
+                if i = count
                 then src
                 else 
                     src.[i] <- src.[i] ^^^ src.[i+1]
@@ -148,7 +150,7 @@
                     src.[i] <- src.[i] ^^^ src.[i+1]
                     swapper src (i + 2)
 
-            if number &&& 1 = 0
+            if count &&& 1 = 0
             then
                 let! bytes = this.ReadBytes number
                 return swapper bytes 0
@@ -162,15 +164,15 @@
         }
     
         override this.ReadUInt16() = parser {
-            let! bytes = this.ReadBytes 2 
-            return (uint16(bytes.[0]) <<< 8) ||| uint16(bytes.[1])
+            let! bytes = this.ReadBytes 2ul 
+            return (uint32(bytes.[0]) <<< 8) ||| uint32(bytes.[1])
         }
 
-        override this.ReadInt32() = parser {
-            let! bytes = this.ReadBytes 4
-            return (int32(bytes.[0]) <<< 24) ||| (int32(bytes.[1]) <<< 16) ||| (int32(bytes.[2]) <<< 8) ||| int32(bytes.[3])
+        override this.ReadUInt32() = parser {
+            let! bytes = this.ReadBytes 4ul
+            return (uint32(bytes.[0]) <<< 24) ||| (uint32(bytes.[1]) <<< 16) ||| (uint32(bytes.[2]) <<< 8) ||| uint32(bytes.[3])
         }
-    
+
         override this.ReadVRValue vr size = parser {
             let (|ByteSwapped|ToLittleEndian|Direct|) = 
                 function
@@ -190,7 +192,7 @@
     let private implicit_vr_data_element tag_lookup (r : ByteReader) = parser {
         let! tag = r.ReadTag()
         let! vr = tag_lookup tag
-        let! length = r.ReadInt32()
+        let! length = r.ReadUInt32()
         let! value = r.ReadVRValue vr length
         return (tag, vr, value)
     }
@@ -225,18 +227,18 @@
             match vr with
                 | PaddedExplicitLengthVR -> 
                     parser {
-                        let! reserved = r.ReadBytes(2)
-                        let! length = r.ReadInt32()
-                        match uint32 length with
+                        let! reserved = r.ReadBytes 2ul
+                        let! length = r.ReadUInt32()
+                        match length with
                             | Explicit -> return! r.ReadVRValue vr length
                             | TooLong -> return! Error failure_message
                             | Undefined -> return! Error (sprintf "The %A VR does not support undefined length" vr)
                     }
                 | PaddedLengthVR -> 
                     parser {
-                        let! reserved = r.ReadBytes(2)
-                        let! length = r.ReadInt32()
-                        match uint32 length with
+                        let! reserved = r.ReadBytes 2ul
+                        let! length = r.ReadUInt32()
+                        match length with
                             | Explicit -> return! r.ReadVRValue vr length
                             | Undefined -> return! parse_sequence()
                             | TooLong -> return! Error failure_message
@@ -244,7 +246,7 @@
                 | UnpaddedVR -> 
                     parser { 
                         let! result = r.ReadUInt16()
-                        return! r.ReadVRValue vr (int(result))
+                        return! r.ReadVRValue vr result
                     }
             
         let! tag = r.ReadTag()
@@ -273,14 +275,14 @@
     //--------------------------------------------------------------------------------------------------------
 
     let private ``read meta_information`` data = parser {
-        let inline le_to_int (a : byte[]) = (int(a.[3]) <<< 24) ||| (int(a.[2]) <<< 16) ||| (int(a.[1]) <<< 8) ||| int(a.[0])
+        let inline le_to_int (a : byte[]) = (uint32(a.[3]) <<< 24) ||| (uint32(a.[2]) <<< 16) ||| (uint32(a.[1]) <<< 8) ||| uint32(a.[0])
     
         // Find out what the length of the header is and then read the bytes that comprise the header
         let reader = LittleEndianByteReader data
         let! (length_tag, length_vr, raw_length : byte[]) = ``explicit vr data element`` reader
         let value_length = raw_length |> le_to_int
         
-        let! value = reader.ReadBytes(value_length)
+        let! value = reader.ReadBytes value_length
     
         // Now read the bytes that represent the header
         use meta_info_stream = new MemoryStream(value)

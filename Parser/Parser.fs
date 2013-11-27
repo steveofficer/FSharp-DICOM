@@ -23,7 +23,7 @@
         | AT of VM<string> Option
         | CS of VM<string> Option
         | DA of VM<Date> Option
-        | DS of VM<string> Option // this should actually be float or double or something
+        | DS of VM<double> Option // this should actually be float or double or something
         | DT of VM<Date * Time> Option
         | FL of VM<single> Option
         | FD of VM<double> Option
@@ -127,7 +127,7 @@
     let private ``parse multi valued decimal`` (a : byte[]) = op {
         let! string_value = ``parse string`` a
         let values = string_value.Split([|'\\'|])
-        let decimals = Array.map id values // id should actually be a decimal parsing function
+        let decimals = Array.map System.Double.Parse values // id should actually be a decimal parsing function
         return (
             match decimals.Length with
             | 1 -> Single decimals.[0]

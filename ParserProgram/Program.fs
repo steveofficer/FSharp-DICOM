@@ -2,7 +2,7 @@
 
 let parse = 
     function
-        | Lexer.Data (preamble, data_set) -> () //Parser.parse(preamble, data_set)
+        | Lexer.Data (preamble, data_set) -> Parser.parse(preamble, data_set)
         | Lexer.Error reason -> failwithf "Failed: %s" reason
 
 let read_file (file_path : string) = async {
@@ -25,4 +25,12 @@ let main (args : string[]) =
     printfn "Took %A ms in total" timer.Elapsed.TotalMilliseconds
 
     //parsed.[0].Values |> Map.iter (fun k v -> printfn "%A %A" k v)
+    let ``patient orientation`` = 2097184ul
+    let ``image position (patient)`` = 2097202ul
+    let ``image orientation (patient)`` = 2097207ul
+    parsed.[0].Values.[``image orientation (patient)``] |> printfn "%A"
+    
+    
+    
     0
+    
